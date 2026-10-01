@@ -1,0 +1,21 @@
+{
+  "name": "trend-switcher",
+  "version": "0.1.0",
+  "description": "A small ETH/USDC position-switching agent on Base: typed model judgments as votes, a second model's confirmation, hard limits in code, paper by default, everything in a local ledger.",
+  "license": "MIT",
+  "private": false,
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node agent/run-tests.mjs",
+    "check": "node agent/selfcheck.mjs",
+    "paper": "node agent/run.mjs",
+    "report": "node agent/report.mjs",
+    "probe": "node agent/probe-slow-brain.mjs"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "ethers": "^6.10.0"
+  }
+}

@@ -103,7 +103,7 @@ It exists and is deliberately hard to arm: `MODE=live` in `.env` **and** `--live
 
 ## Status
 
-The paper sessions are recorded; their sanitized summaries are in `SESSIONS.md`. The write-up will be linked here when it is published.
+The paper sessions are recorded; their sanitized summaries are in `SESSIONS.md`. The write-up: [A cheap trend-following ETH/USDC bot with two models in the loop: what paper trading showed](https://dimonb19a.hashnode.dev/a-cheap-trend-following-eth-usdc-bot-with-two-models-in-the-loop-what-paper-trading-showed) (also on [dev.to](https://dev.to/dimonb19a/a-cheap-trend-following-ethusdc-bot-with-two-models-in-the-loop-what-paper-trading-showed-2g14)).
 
 ## License
 

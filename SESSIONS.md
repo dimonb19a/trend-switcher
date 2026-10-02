@@ -2,7 +2,7 @@
 
 What is published about each session: its UTC window, the preset and slow-brain frame, the slots planned and attempted, the number of switches, the result at the virtual capital against holding the starting position over the same window, and how the session ended. What is not published: the ledgers, logs and reports themselves, the call counts and costs of either model, their latencies, their answer distributions, hostnames and configuration hashes. Zero switches is a result of the voting rule, not a measurement of any model.
 
-Every session: paper mode, a virtual capital of 1,000 USD, the starting position in ETH, a 60-second tick, on-chain quotes from Uniswap v3 on Base, the Coinbase ETH-USD tape. "Hold" is the value of keeping the starting position for the same window: a diagnostic benchmark, not a strategy. Results are mark-to-market at the end of the window after the paper execution costs (quote, slippage, estimated gas); the inference bills are booked separately and are small against the capital. Sessions 1–3 ran on a Windows laptop, 4–5 on a macOS laptop.
+Every session: paper mode, a virtual capital of 1,000 USD, the starting position in ETH, a 60-second tick, on-chain quotes from Uniswap v3 on Base, the Coinbase ETH-USD tape. "Hold" is the value of keeping the starting position for the same window: a diagnostic benchmark, not a strategy. Results are mark-to-market at the end of the window after the paper execution costs (quote, slippage, estimated gas); the inference bills are booked separately and are small against the capital. Sessions 1–3 and 6 ran on a Windows laptop, 4–5 on a macOS laptop.
 
 | # | Window (UTC) | Preset · slow-brain frame | Slots attempted / planned | Switches | Result vs capital | Hold | How it ended |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -14,6 +14,7 @@ Every session: paper mode, a virtual capital of 1,000 USD, the starting position
 | 5a | 2026-10-01 15:33 → 20:33 | `trend` · forecast frame | 300 / 300 | 2 | −0.09 % | +0.83 % | deadline |
 | 5b | the same window | `trend` · no slow brain | 300 / 300 | 2 | −0.07 % | +0.88 % | deadline |
 | 5c | the same window | `trend` · regime frame | 300 / 300 | 2 | −0.10 % | +0.82 % | deadline |
+| 6 | 2026-10-02 00:11 → 00:41 | `trend` · forecast frame | 30 / 30 | 0 | −0.043 % before inference | the same (no switch) | deadline (smoke run) |
 
 Notes.
 

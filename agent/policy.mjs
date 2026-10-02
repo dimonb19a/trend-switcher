@@ -102,6 +102,32 @@ export function trendFilter(features, target) {
 }
 
 /**
+ * The optional breakout condition (BREAKOUT_MIN_PCT > 0): a switch to USDC needs the price at least that many
+ * percent BELOW the low of the closed candles of the lookback window, a switch to ETH the same ABOVE its high.
+ * Judgments a minute apart see almost the same state, so agreeing votes are one opinion repeated; this makes the
+ * candidate depend on new information. A missing or stale range vetoes. Deterministic; no model involved.
+ */
+export function breakoutFilter(features, target, cfg = defaultCfg) {
+  const pct = cfg.breakoutMinPct;
+  if (!finite(pct) || pct <= 0) return { ok: true, skipped: true };
+  const range = features?.[`range${cfg.breakoutLookbackMin / 60}h`];
+  const price = features?.price;
+  if (!range || !finite(range.high) || !finite(range.low) || !finite(price)) return { ok: false, reason: `breakout filter: ${cfg.breakoutLookbackMin}-min range unavailable` };
+  const minutes = cfg.breakoutLookbackMin;
+  if (target === 'USDC') {
+    const bar = range.low * (1 - pct / 100);
+    if (price > bar) return { ok: false, reason: `breakout filter: price ${price.toFixed(2)} is not ${pct}% below the ${minutes}-min low ${range.low.toFixed(2)} (bar ${bar.toFixed(2)})` };
+    return { ok: true, bar, low: range.low };
+  }
+  if (target === 'ETH') {
+    const bar = range.high * (1 + pct / 100);
+    if (price < bar) return { ok: false, reason: `breakout filter: price ${price.toFixed(2)} is not ${pct}% above the ${minutes}-min high ${range.high.toFixed(2)} (bar ${bar.toFixed(2)})` };
+    return { ok: true, bar, high: range.high };
+  }
+  return { ok: false, reason: 'breakout filter: unknown target' };
+}
+
+/**
  * Hard limits. Every one is a veto that no model can lift. Every input must be
  * a finite number or a known value; anything unknown vetoes.
  */

@@ -118,7 +118,7 @@ test('ledger: the effective configuration is stored under its hash, without secr
   const h = makeHarness({ env: { ...VIRTUAL, TICK_MS: '60000', INFERENCE_BUDGET_USD_PER_DAY: '3' } });
   const stored = h.ledger.kv.get(`config:${h.ledger.provenance.configHash}`);
   assert.equal(stored.tickMs, 60_000); assert.equal(stored.paperCapitalUsd, 1000); assert.equal(stored.maxCapitalUsd, 2000); assert.equal(stored.inferenceBudgetUsdPerDay, 3);
-  assert.equal(stored.version, '2.10.0'); assert.ok(stored.recordedAt);
+  assert.equal(stored.version, '2.11.0'); assert.ok(stored.recordedAt);
   const text = JSON.stringify(stored);
   assert.ok(!/PRIVATE_KEY|DEEPSEEK_API_KEY|JUDGE_API_KEY|0x[0-9a-f]{64}/iu.test(text), 'no key, no key name, no 32-byte hex');
   assert.equal(stored.privateKey, 'unset'); assert.equal(stored.deepseekKey, 'unset'); assert.equal(stored.judgeKey, 'unset');

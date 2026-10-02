@@ -14,7 +14,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 export const ROOT = resolve(here, '..');
 export const OWNER_CAP_USD = 100; // the real-money ceiling of this pilot: the live notional cap never exceeds it
 export const FEATURE_SCHEMA = 'features-v2.1';
-export const AGENT_VERSION = '2.10.0';
+export const AGENT_VERSION = '2.11.0';
 
 /**
  * Named starting points for the vote rule (README: Presets). `trend` (the default) and `trend-fast` vote
@@ -139,6 +139,11 @@ export function loadConfig(env = process.env) {
     voteMin: int('VOTE_MIN', preset?.voteMin ?? 5, 1, 20),
     minDirectionP: num('MIN_DIRECTION_P', 0.7, 0.5, 0.99),
     minRegimeP: num('MIN_REGIME_P', 0.5, 0.5, 0.99),
+    // breakout condition (README: Presets), off by default: a candidate passes only when the price has moved beyond the
+    // high/low of the closed candles of the last BREAKOUT_LOOKBACK_MIN minutes by at least BREAKOUT_MIN_PCT percent —
+    // new information, not another judgment of the same state. Part of the hashed configuration.
+    breakoutMinPct: num('BREAKOUT_MIN_PCT', 0, 0, 20),
+    breakoutLookbackMin: int('BREAKOUT_LOOKBACK_MIN', 120, 60, 240),
     maxRiskOffP: num('MAX_RISK_OFF_P', 0.6, 0.1, 0.9),
     // slow brain. SLOW_BRAIN_FRAME: the question the slow brain is asked — `forecast` (the candidate against the
     // next 15 minutes and the execution cost) or `regime` (whether the judge's multi-hour regime is likely to
@@ -180,6 +185,7 @@ export function loadConfig(env = process.env) {
   }
   if (mode === 'live' && !(c.maxCapitalUsd <= OWNER_CAP_USD)) problems.push(`live cap $${c.maxCapitalUsd} above the owner ceiling $${OWNER_CAP_USD}`); // unreachable by construction; stated so the guarantee is explicit
   if (c.voteMin > c.voteWindow) problems.push(`VOTE_MIN=${c.voteMin} exceeds VOTE_WINDOW=${c.voteWindow}`);
+  if (![60, 120, 240].includes(c.breakoutLookbackMin)) problems.push('BREAKOUT_LOOKBACK_MIN must be 60, 120 or 240 (the ranges the features compute)');
   if (c.killLossPct <= c.maxDailyLossPct) problems.push('KILL_LOSS_PCT must exceed MAX_DAILY_LOSS_PCT');
   if (c.expectedSlippageBps > c.slippageBps) problems.push('EXPECTED_SLIPPAGE_BPS must not exceed SLIPPAGE_BPS');
   if (c.rpcTimeoutMs > c.quoteDeadlineMs) problems.push('RPC_TIMEOUT_MS must not exceed QUOTE_DEADLINE_MS');

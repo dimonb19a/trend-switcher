@@ -31,7 +31,7 @@
 // the engine and the ledger must share one clock (R1-A). `run.mjs` wires the
 // real deps.
 import { existsSync } from 'node:fs';
-import { VoteWindow, limits, riskBreach, trendFilter } from './policy.mjs';
+import { VoteWindow, breakoutFilter, limits, riskBreach, trendFilter } from './policy.mjs';
 import { computeFeatures, renderState } from './features.mjs';
 import { OPEN_LEG_STATES } from './ledger.mjs';
 import { RecordableError, describeError  } from './errors.mjs';
@@ -209,6 +209,8 @@ export function createEngine(deps) {
       if (c.target !== target) problems.push(`candidate no longer ${target}: ${c.reason}`);
       const tf = features ? trendFilter(features, target) : { ok: false, reason: 'no features' };
       if (!tf.ok) problems.push(tf.reason);
+      const bf = features ? breakoutFilter(features, target, cfg) : { ok: false, reason: 'no features' };
+      if (!bf.ok) problems.push(bf.reason);
     }
     return { ok: problems.length === 0, problems, stage, now, price, priceAt, priceSource, position, stats: st, features, notionalUsd };
   }
@@ -583,6 +585,8 @@ export function createEngine(deps) {
       // 2) candidate → trend filter → limits → slow brain → verdict → execution
       const tf = trendFilter(features, c.target);
       if (!tf.ok) { ledger.insertDecision({ price, position: position.side, candidate: c.target, votes: c.votes, outcome: 'vetoed', reason: tf.reason, stage: 'trend' }); log('candidate vetoed', { target: c.target, reason: tf.reason }); return { vetoed: tf.reason }; }
+      const bf = breakoutFilter(features, c.target, cfg);
+      if (!bf.ok) { ledger.insertDecision({ price, position: position.side, candidate: c.target, votes: c.votes, outcome: 'vetoed', reason: bf.reason, stage: 'breakout' }); log('candidate vetoed by the breakout condition', { target: c.target, reason: bf.reason }); return { vetoed: bf.reason }; }
       const notionalUsd = c.target === 'USDC' ? position.ethUsd : position.usdc;
       const lim = limits({ now: clock(), features, position: { ...position, lastSwitchAt: st.lastSwitchAt }, stats: st, notionalUsd }, cfg);
       if (!lim.ok) { ledger.insertDecision({ price, position: position.side, candidate: c.target, votes: c.votes, outcome: 'blocked', reason: lim.problems.join('; '), stage: 'limits' }); log('candidate blocked by limits', { target: c.target, problems: lim.problems }); return { blocked: lim.problems }; }

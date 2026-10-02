@@ -99,3 +99,39 @@ test('non-finite or missing safety inputs veto instead of passing (TR-09)', () =
 test('the pilot cap cannot exceed 100 dollars', () => {
   assert.ok(cfg.maxCapitalUsd <= 100);
 });
+
+// ---- breakout condition (experiment 1, 2026-10-02): new information, not another vote ----
+import { breakoutFilter } from './policy.mjs';
+import { computeFeatures } from './features.mjs';
+import { makeSnapshot } from './test-helpers.mjs';
+
+test('the breakout condition is off by default and, when on, vetoes a switch inside the lookback range and passes one beyond it by the bar', () => {
+  const off = makeCfg({ RISK_PRESET: 'trend' });
+  const range = { minutes: 120, high: 3100, low: 3000, candles: 24 };
+  assert.deepEqual(breakoutFilter({ price: 3050, range2h: range }, 'USDC', off), { ok: true, skipped: true });
+  const on = makeCfg({ RISK_PRESET: 'trend', BREAKOUT_MIN_PCT: '0.9', BREAKOUT_LOOKBACK_MIN: '120' });
+  assert.equal(on.breakoutMinPct, 0.9); assert.equal(on.breakoutLookbackMin, 120);
+  assert.equal(breakoutFilter({ price: 3050, range2h: range }, 'USDC', on).ok, false, 'inside the range');
+  assert.equal(breakoutFilter({ price: 2980, range2h: range }, 'USDC', on).ok, false, 'below the low but not by the bar');
+  assert.equal(breakoutFilter({ price: 3000 * (1 - 0.009) - 0.01, range2h: range }, 'USDC', on).ok, true, 'below the low by more than 0.9 %');
+  assert.equal(breakoutFilter({ price: 3120, range2h: range }, 'ETH', on).ok, false, 'above the high but not by the bar');
+  assert.equal(breakoutFilter({ price: 3100 * 1.009 + 0.01, range2h: range }, 'ETH', on).ok, true, 'above the high by more than 0.9 %');
+  assert.equal(breakoutFilter({ price: 2900, range2h: null }, 'USDC', on).ok, false, 'a missing range vetoes');
+  assert.equal(breakoutFilter({ price: NaN, range2h: range }, 'USDC', on).ok, false, 'a non-finite price vetoes');
+  assert.equal(breakoutFilter({ price: 2900, range2h: range }, 'XYZ', on).ok, false, 'an unknown target vetoes');
+  const four = makeCfg({ RISK_PRESET: 'trend', BREAKOUT_MIN_PCT: '0.9', BREAKOUT_LOOKBACK_MIN: '240' });
+  assert.equal(breakoutFilter({ price: 2900, range2h: range, range4h: null }, 'USDC', four).ok, false, 'the lookback picks its own range');
+  assert.throws(() => makeCfg({ BREAKOUT_LOOKBACK_MIN: '90' }), /BREAKOUT_LOOKBACK_MIN/u);
+});
+
+test('the features expose the closed-candle ranges of the last 1, 2 and 4 hours and leave the forming candle out', () => {
+  const now = T0 + 120_000; // two minutes into a candle
+  const f = computeFeatures(makeSnapshot({ now, price: 3000, trendUp: true, candleCount: 300 }), null, now);
+  for (const key of ['range1h', 'range2h', 'range4h']) {
+    assert.ok(f[key], key); assert.ok(f[key].high > f[key].low); assert.ok(f[key].candles >= (f[key].minutes / 5) * 0.8, `${key} populated`);
+  }
+  assert.equal(f.range1h.candles <= 12, true); assert.equal(f.range2h.candles <= 24, true);
+  assert.ok(f.range2h.high - f.range2h.low >= f.range1h.high - f.range1h.low, 'a longer window spans at least as much');
+  const stale = computeFeatures(makeSnapshot({ now, price: 3000, candleCount: 5 }), null, now);
+  assert.equal(stale.range2h, null, 'too few closed candles: no range');
+});

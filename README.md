@@ -41,6 +41,8 @@ The judge answers four questions every tick. Which answers count as a vote, and 
 | `trend-fast` | regime | 3 of 4 | follows the regime after three agreeing minutes; more switches, more whipsaw cost |
 | `forecast` | forecast | 5 of 6 | the control: the rule of the first sessions; switches only on a judged 15-minute move beyond cost; no qualifying vote in the sessions recorded so far |
 
+**Breakout condition** (`BREAKOUT_MIN_PCT`, off by default): judgments a minute apart see almost the same state, so five agreeing votes are closer to one opinion repeated than to five checks. With `BREAKOUT_MIN_PCT=0.9` a candidate also needs the price to have moved past the high or low of the closed candles of the last `BREAKOUT_LOOKBACK_MIN` minutes (60, 120 or 240) by that many percent: a switch to USDC only below the range, a switch to ETH only above it. The bar is the cost of a false flip measured in the paper sessions (0.6–0.9 % against holding). It trades later by construction and does not prove an edge; it is there to be tested, with the bar written down before the run. Persistence over several 5-minute candles instead of several 1-minute ticks is the same idea through the window: `VOTE_WINDOW=20 VOTE_MIN=18` requires about four candles of agreement.
+
 Not offered as presets: 9 of 10 (nine agreeing minutes before an entry, more than the regime basis needs) and 2 of 3 (a short confirmation; every other veto, the daily switch cap and the minimum hold still apply). Both remain settable through `VOTE_WINDOW` and `VOTE_MIN`. Every preset keeps the trend filter, the slow brain, the risk-off ceiling and the hard limits; the slow brain is told which basis a candidate stands on.
 
 ## What we tested, and what we did not

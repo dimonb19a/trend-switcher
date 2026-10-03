@@ -122,6 +122,10 @@ export function openLedger(cfg = defaultCfg, { clock = () => Date.now() } = {}) 
     CREATE INDEX IF NOT EXISTS switches_status ON switches (mode, status);
     CREATE INDEX IF NOT EXISTS costs_ts ON costs (mode, ts);
     CREATE INDEX IF NOT EXISTS arms_ts ON arms (mode, arm, ts);
+    -- two reads the engine makes on every tick, over tables that grow by a row per tick: without these a long
+    -- run (a seven-month replay, sixty thousand ticks) slowed from a third of a second a tick to seconds a tick
+    CREATE INDEX IF NOT EXISTS inference_billing ON inference_calls (mode, billing);
+    CREATE INDEX IF NOT EXISTS costs_external ON costs (mode, external);
     PRAGMA user_version = ${SCHEMA_VERSION};
   `);
   if (hasTables) assertCompatibleRows(db, cfg.databasePath);

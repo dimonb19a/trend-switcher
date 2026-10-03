@@ -91,6 +91,47 @@ A **timed session** is the measurement unit: paper only, a virtual capital, a fr
 
 To **compare presets**, run several sessions over the same hours with different `RISK_PRESET` values and separate `AGENT_DB_PATH` and `AGENT_LOCK_PATH`. Paper has no on-chain effect, so parallel sessions cannot trade against each other; they still have separate feeds, quotes and API timings and share the machine and the RPC endpoint, so the comparison is over the same market window, not over identical input. `RUNBOOK.md` shows the three-preset layout.
 
+## Replay: the same bot over a month of history
+
+A paper session on the live tape measures one night. To see what the bot does in a real selloff
+without waiting for one, `agent/replay.mjs` runs the same engine, features, vote rule, filters,
+limits and judge over historical Coinbase candles under a simulated clock, into a fresh ledger that
+`report.mjs` and `agent/replay-report.mjs` read like any other.
+
+```sh
+node agent/history-fetch.mjs --from 2021-04-29T22:00:00Z --to 2021-06-01T00:00:00Z --granularity 60
+node agent/history-fetch.mjs --from 2021-04-29T22:00:00Z --to 2021-06-01T00:00:00Z --granularity 300
+MODE=paper PAPER_CAPITAL_USD=10000 TICK_MS=300000 REQUIRE_DEEPSEEK=false AGENT_DB_PATH=data/replay-may2021.db \
+  node agent/replay.mjs --from 2021-05-01T00:00:00Z --to 2021-06-01T00:00:00Z \
+  --minutes data/history/ETH-USD-60s-20210429T2200_20210601T0000.jsonl --candles data/history/ETH-USD-300s-20210429T2200_20210601T0000.jsonl
+node agent/replay-report.mjs --db data/replay-may2021.db
+```
+
+What is the same: everything that decides. What is replaced, and how:
+
+- **The tape.** A minute becomes observable only once it has closed (Coinbase stamps the bucket's
+  start; the replay stamps its end), and its close is the tape's sample. A minute with no trades is a
+  gap, as live. A missing five-minute bucket is filled flat and counted, so one hole does not blind
+  the 25-hour context for a day. One sample a minute is not a trade: the state says the trade
+  activity is unknown.
+- **The fill.** The open of the minute that starts at the decision instant, times the pool fee
+  (0.05 %) and a price impact read at the notional from a table measured on the Base pool on
+  2026-10-02 (0.15 / 1.3 / 12.8 / 133 basis points one way at $1k / $10k / $100k / $1M); the engine
+  adds its expected slippage as live. A pool that did not exist in 2021 has no historical quote; this
+  is a scenario, and the report says so.
+- **The date.** The state's time line is replaced by `Time (UTC): not provided.` for both models.
+  A model that has seen the period in training is not handed the day; the price level remains a
+  hint, so a replay is a screening with that caveat, never a proof.
+- **The daily stop.** Live, a latched daily loss waits for the owner's `--reset-halt`. A replay has
+  no owner at the keyboard: the daily latch is lifted at the next simulated UTC midnight; the kill
+  limit and any switch-level halt are never lifted.
+
+The judge is called once per tick, in order (its question depends on the position), so a month at a
+five-minute tick is about 8 600 calls per arm and takes as long as the judge's latency allows; arms
+run as separate processes. Rate-limited replies are retried a few times rather than counted as lost
+judgments. The replay-report shows the arm against holding ETH over the same window, with the worst
+drop of each and where the arm stood at the hold's lowest point: the view a hedge is judged by.
+
 ## The ledger
 
 One SQLite file per run, schema-versioned, never migrated silently. It holds every judgment, every decision with its stage (window not full, candidate, vetoed by the trend filter, blocked by limits, deferred by the cooldown, vetoed by the slow brain, executed), every switch with its legs and receipts, every cost, the equity curve, every inference attempt with KNOWN or UNKNOWN billing, per-slot observations, the compressed market state of every tick, and the effective configuration under its hash. Keys appear in it only as `set` or `unset`. `agent/report.mjs` reads a ledger read-only and prints the day report; `--json` gives the same as data.
@@ -101,7 +142,7 @@ It exists and is deliberately hard to arm: `MODE=live` in `.env` **and** `--live
 
 ## Tests
 
-`npm test` covers the configuration schema, the policy, the engine, four rounds of boundary regressions from independent reviews, the virtual-capital paper mode, the report, the readiness of timed sessions, the feed and features, the lock, and the slow-brain contract. Everything runs on fakes with one injected clock.
+`npm test` covers the configuration schema, the policy, the engine, four rounds of boundary regressions from independent reviews, the virtual-capital paper mode, the report, the readiness of timed sessions, the feed and features, the lock, the slow-brain contract, and the replay (availability of history, the hidden date, the cost scenario and the next-minute fill, the midnight rule, one replay end to end). Everything runs on fakes with one injected clock.
 
 ## Status
 

@@ -69,6 +69,25 @@ AGENT_DB_PATH=./data/forecast.db   AGENT_LOCK_PATH=./data/forecast.lock   RISK_P
 
 Paper fills have no on-chain effect, so the sessions cannot trade against each other; each has its own feed, quotes and API timings, and they share the machine and the RPC endpoint (give parallel arms a keyed `RPC_URL` and start them a few seconds apart). Each pays its own judge calls (three sessions cost three times the judge calls of one). Compare the reports: same hours, same market, not identical input. `trend` against `trend-fast` shows what the persistence window changes; `forecast` against either shows what the vote basis changes. If every arm stays flat, read the funnel before concluding anything: a gate or a halt keeps an arm flat as surely as a market without a regime flip. On a laptop keep the machine awake for the whole session (`caffeinate -is` on macOS) and leave the lid open.
 
+## Replaying history
+
+1. Fetch the candles once per window, with a day of warm-up before the first decision (the
+   24-hour features need 280 closed five-minute candles): `node agent/history-fetch.mjs --from
+   <start minus 26 h> --to <end> --granularity 60` and the same with `--granularity 300`. The tool
+   writes `data/history/*.jsonl` and a `.meta.json` with the row count, every gap and the SHA-256;
+   it refuses to overwrite without `--force`.
+2. Run one arm per process on a fresh `AGENT_DB_PATH`, with the judge environment of a paper
+   session, `MODE=paper`, `PAPER_CAPITAL_USD`, `TICK_MS` of 60000 or 300000 and
+   `REQUIRE_DEEPSEEK=false` unless you give the slow brain a key (it then sees the same hidden-date
+   state). Strategy knobs are the usual ones (`RISK_PRESET`, `BREAKOUT_MIN_PCT`, `VOTE_*`,
+   `MAX_DAILY_LOSS_PCT`). `--no-judge` walks the whole path without a model call.
+3. The runner logs a progress line a minute and the switches; `node agent/replay-report.mjs --db
+   <ledger> [--db <ledger> ...]` prints each arm against hold and a comparison table. Keep the ledgers
+   and the history files' hashes with the result; the manifest in the ledger (`session:paper`)
+   records the window, the files, the cost scenario and the hidden-date line.
+4. Several arms at once share the judge's rate limit with any live paper session on the same key:
+   stagger the launches, and watch the live session's log for judge errors.
+
 ## When something refuses to start
 
 - `refusing a timed paper session: ...` names what is missing: paper mode, `PAPER_CAPITAL_USD`, whole minutes in 1..1440, the judge key, the slow-brain key while `REQUIRE_DEEPSEEK=true`, or a flag that does not combine with a timed run.

@@ -112,7 +112,7 @@ export function loadConfig(env = process.env) {
     receiptTimeoutMs: int('RECEIPT_TIMEOUT_MS', 90_000, 15_000, 600_000),
     // virtual capital (paper only): the virtual wallet opens with this many dollars in ETH at the tape's price
     // instead of mirroring a real wallet; null = mirror the real wallet at ACCOUNT_ADDRESS
-    paperCapitalUsd: mode === 'paper' ? num('PAPER_CAPITAL_USD', null, 10, 100_000) : null,
+    paperCapitalUsd: mode === 'paper' ? num('PAPER_CAPITAL_USD', null, 10, 1_000_000) : null, // up to one million: a size ladder shows the pool's price impact in real quotes
     // hard limits (code, never delegated to a model)
     maxCapitalUsd: null, // set below: the owner's real-money cap, or the paper cap of a virtual-capital run
     maxSwitchesPerDay: int('MAX_SWITCHES_PER_DAY', 6, 1, 24),

@@ -128,7 +128,8 @@ export function computeFeatures(snapshot, quotes, now = Date.now()) {
   }
 
   const fiveMinutesAgo = now - 5 * 60_000;
-  const tickRate = covered(snapshot, fiveMinutesAgo, now) ? snapshot.ticks.filter((t) => t.t >= fiveMinutesAgo).length / 5 : null;
+  // a replay tape carries one sample per minute, which is not a trade: its activity is unknown, never "1 trade per minute"
+  const tickRate = snapshot.synthetic === true ? null : covered(snapshot, fiveMinutesAgo, now) ? snapshot.ticks.filter((t) => t.t >= fiveMinutesAgo).length / 5 : null;
   const spreadBps = last?.bid && last?.ask && last.ask > last.bid ? ((last.ask - last.bid) / last.ask) * 10_000 : null;
 
   const coverageMinutes = (() => {

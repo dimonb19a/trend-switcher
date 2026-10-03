@@ -32,7 +32,7 @@
 // real deps.
 import { existsSync } from 'node:fs';
 import { VoteWindow, breakoutFilter, limits, riskBreach, trendFilter } from './policy.mjs';
-import { computeFeatures, renderState } from './features.mjs';
+import { computeFeatures, renderState as defaultRenderState } from './features.mjs';
 import { OPEN_LEG_STATES } from './ledger.mjs';
 import { RecordableError, describeError  } from './errors.mjs';
 
@@ -49,6 +49,7 @@ export function createEngine(deps) {
     cfg, armed, chain, ledger, feed, judge, slowBrain, arms = null,
     clock = () => Date.now(), fsx = { existsSync }, log = () => {}, judgeEnabled = true,
     canAct = () => true, captureInputs = false,
+    renderState = defaultRenderState, // the one text both models read; a replay injects a renderer that hides the date
   } = deps;
   const mode = armed ? 'live' : 'paper';
   if (mode !== cfg.mode) throw new RecordableError(`engine mode ${mode} disagrees with configuration mode ${cfg.mode}`);

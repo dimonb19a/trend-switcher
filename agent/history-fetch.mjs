@@ -94,22 +94,30 @@ export function readHistory(path) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const { values } = parseArgs({ options: { from: { type: 'string' }, to: { type: 'string' }, granularity: { type: 'string', default: '60' }, product: { type: 'string', default: 'ETH-USD' }, out: { type: 'string' }, force: { type: 'boolean', default: false } } });
+  const { values } = parseArgs({ options: { from: { type: 'string' }, to: { type: 'string' }, granularity: { type: 'string', default: '60' }, product: { type: 'string', default: 'ETH-USD' }, out: { type: 'string' }, force: { type: 'boolean', default: false }, 'meta-only': { type: 'boolean', default: false } } });
   const fromMs = Date.parse(values.from ?? ''); const toMs = Date.parse(values.to ?? ''); const granularity = Number(values.granularity);
   if (!finite(fromMs) || !finite(toMs)) { console.error('--from and --to must be ISO instants (UTC)'); process.exit(2); }
   const stamp = (ms) => new Date(ms).toISOString().slice(0, 16).replace(/[-:]/gu, '').replace('T', 'T');
   const out = values.out ? resolve(values.out) : resolve(ROOT, 'data', 'history', `${values.product}-${granularity}s-${stamp(fromMs)}_${stamp(toMs)}.jsonl`);
-  if (existsSync(out) && !values.force) { console.error(`exists: ${out} (use --force to refetch)`); process.exit(2); }
+  const metaOnly = values['meta-only'];
+  if (existsSync(out) && !values.force && !metaOnly) { console.error(`exists: ${out} (use --force to refetch, or --meta-only to rewrite its sidecar)`); process.exit(2); }
   mkdirSync(dirname(out), { recursive: true });
   const log = (m) => console.log(`[${new Date().toISOString()}] ${m}`);
-  const rows = await fetchHistory({ product: values.product, granularity, fromMs, toMs, log });
-  writeFileSync(out, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  let rows;
+  if (metaOnly) {
+    if (!existsSync(out)) { console.error(`--meta-only: ${out} does not exist`); process.exit(2); }
+    rows = canonicalize(readHistory(out), granularity * 1000); // the file is re-validated, never trusted on its name
+  } else {
+    rows = await fetchHistory({ product: values.product, granularity, fromMs, toMs, log });
+    writeFileSync(out, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  }
   const gaps = gapsOf(rows, granularity * 1000);
   const expected = (toMs - fromMs) / (granularity * 1000);
+  let low = null; let high = null; // a loop, not a spread: a year of minutes would overflow the call stack
+  for (const r of rows) { if (low === null || r.low < low) low = r.low; if (high === null || r.high > high) high = r.high; }
   const meta = { product: values.product, granularity, from: new Date(fromMs).toISOString(), to: new Date(toMs).toISOString(), rows: rows.length, expectedBuckets: expected,
-    missingBuckets: expected - rows.length, gaps, source: `${REST_URL}/products/${values.product}/candles`, fetchedAt: new Date().toISOString(), sha256: sha256File(out),
-    first: rows.length ? new Date(rows[0].t).toISOString() : null, last: rows.length ? new Date(rows[rows.length - 1].t).toISOString() : null,
-    low: rows.length ? Math.min(...rows.map((r) => r.low)) : null, high: rows.length ? Math.max(...rows.map((r) => r.high)) : null };
+    missingBuckets: expected - rows.length, gaps, source: `${REST_URL}/products/${values.product}/candles`, fetchedAt: metaOnly ? 'sidecar rewritten from the existing file' : new Date().toISOString(), sha256: sha256File(out),
+    first: rows.length ? new Date(rows[0].t).toISOString() : null, last: rows.length ? new Date(rows[rows.length - 1].t).toISOString() : null, low, high };
   writeFileSync(out.replace(/\.jsonl$/u, '.meta.json'), JSON.stringify(meta, null, 2) + '\n');
   log(`${rows.length}/${expected} buckets, ${gaps.length} gaps (${meta.missingBuckets} missing), low ${meta.low} high ${meta.high}, sha256 ${meta.sha256.slice(0, 16)}… → ${out}`);
 }

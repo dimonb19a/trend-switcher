@@ -203,7 +203,7 @@ export function createEngine(deps) {
       if (available < send.amountInRaw) problems.push(`balance changed since the plan: ${send.label} available ${send.label === 'USDC' ? formatUnits(available, 6) : formatEther(available)} < planned ${send.amountIn}`);
       notionalUsd = send.label === 'USDC' ? send.amountIn : send.amountIn * price;
     }
-    const lim = features ? limits({ now, features, position: { ...position, lastSwitchAt: st.lastSwitchAt }, stats: st, notionalUsd }, cfg) : { ok: false, problems: ['features unavailable'] };
+    const lim = features ? limits({ now, features, position: { ...position, lastSwitchAt: st.lastSwitchAt }, stats: st, notionalUsd, target }, cfg) : { ok: false, problems: ['features unavailable'] };
     if (!lim.ok) problems.push(...lim.problems);
     if (target) {
       const c = votes.candidate(position, now);
@@ -589,7 +589,7 @@ export function createEngine(deps) {
       const bf = breakoutFilter(features, c.target, cfg);
       if (!bf.ok) { ledger.insertDecision({ price, position: position.side, candidate: c.target, votes: c.votes, outcome: 'vetoed', reason: bf.reason, stage: 'breakout' }); log('candidate vetoed by the breakout condition', { target: c.target, reason: bf.reason }); return { vetoed: bf.reason }; }
       const notionalUsd = c.target === 'USDC' ? position.ethUsd : position.usdc;
-      const lim = limits({ now: clock(), features, position: { ...position, lastSwitchAt: st.lastSwitchAt }, stats: st, notionalUsd }, cfg);
+      const lim = limits({ now: clock(), features, position: { ...position, lastSwitchAt: st.lastSwitchAt }, stats: st, notionalUsd, target: c.target }, cfg);
       if (!lim.ok) { ledger.insertDecision({ price, position: position.side, candidate: c.target, votes: c.votes, outcome: 'blocked', reason: lim.problems.join('; '), stage: 'limits' }); log('candidate blocked by limits', { target: c.target, problems: lim.problems }); return { blocked: lim.problems }; }
 
       let ds = null;

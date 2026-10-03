@@ -145,6 +145,11 @@ export function loadConfig(env = process.env) {
     breakoutMinPct: num('BREAKOUT_MIN_PCT', 0, 0, 20),
     breakoutLookbackMin: int('BREAKOUT_LOOKBACK_MIN', 120, 60, 240),
     maxRiskOffP: num('MAX_RISK_OFF_P', 0.6, 0.1, 0.9),
+    // RISK_LATCH_BLOCKS_EXITS (default true, the published behaviour): a latched daily or total loss limit halts every switch.
+    // false: the latch halts only switches INTO ETH; a switch into USDC — the risk-reducing move a hedge exists for — stays
+    // allowed. Halts of other kinds (an unresolved on-chain outcome, an UNKNOWN bill) block both directions either way.
+    // Part of the hashed configuration.
+    riskLatchBlocksExits: bool(env.RISK_LATCH_BLOCKS_EXITS, true),
     // slow brain. SLOW_BRAIN_FRAME: the question the slow brain is asked — `forecast` (the candidate against the
     // next 15 minutes and the execution cost) or `regime` (whether the judge's multi-hour regime is likely to
     // persist long enough to pay for the switch). Part of the hashed configuration.

@@ -131,7 +131,7 @@ export function breakoutFilter(features, target, cfg = defaultCfg) {
  * Hard limits. Every one is a veto that no model can lift. Every input must be
  * a finite number or a known value; anything unknown vetoes.
  */
-export function limits({ now, features, position, stats, notionalUsd }, cfg = defaultCfg) {
+export function limits({ now, features, position, stats, notionalUsd, target = null }, cfg = defaultCfg) {
   const problems = [];
   const need = (name, v) => { if (!finite(v)) problems.push(`${name} unknown`); };
   need('now', now); need('notionalUsd', notionalUsd);
@@ -141,10 +141,15 @@ export function limits({ now, features, position, stats, notionalUsd }, cfg = de
   if (features.tapeEventAgeSec > cfg.maxDataAgeSec) problems.push(`tape stale (${features.tapeEventAgeSec.toFixed(0)} s)`);
   if (features.candlesEventAgeSec > cfg.maxCandleAgeSec) problems.push('candles stale');
   if (features.dataQuality?.degraded) problems.push(`data degraded: ${features.dataQuality.reasons.join('; ')}`);
-  if (stats.halt) problems.push(`halted: ${stats.halt.reason ?? stats.halt} (reset with --reset-halt)`);
+  // A latched loss limit (a halt whose reason starts with "risk (") blocks every switch by default; with
+  // RISK_LATCH_BLOCKS_EXITS=false it blocks only switches into ETH, and a switch into USDC — the risk-reducing move —
+  // stays allowed. Any other halt (an unresolved outcome, an UNKNOWN bill) blocks both directions regardless.
+  const riskLatch = typeof stats.halt?.reason === 'string' && stats.halt.reason.startsWith('risk (');
+  const exitAllowed = cfg.riskLatchBlocksExits === false && target === 'USDC';
+  if (stats.halt && !(riskLatch && exitAllowed)) problems.push(`halted: ${stats.halt.reason ?? stats.halt} (reset with --reset-halt)`);
   if (stats.pendingSwitches > 0) problems.push(`${stats.pendingSwitches} switch(es) pending or unresolved`);
-  if (finite(stats.totalNetPnlPct) && stats.totalNetPnlPct <= -cfg.killLossPct) problems.push(`total net loss ${stats.totalNetPnlPct.toFixed(1)}% beyond the kill limit ${cfg.killLossPct}%`);
-  if (finite(stats.dailyNetPnlPct) && stats.dailyNetPnlPct <= -cfg.maxDailyLossPct) problems.push(`daily net loss ${stats.dailyNetPnlPct.toFixed(1)}% beyond the daily limit ${cfg.maxDailyLossPct}%`);
+  if (!exitAllowed && finite(stats.totalNetPnlPct) && stats.totalNetPnlPct <= -cfg.killLossPct) problems.push(`total net loss ${stats.totalNetPnlPct.toFixed(1)}% beyond the kill limit ${cfg.killLossPct}%`);
+  if (!exitAllowed && finite(stats.dailyNetPnlPct) && stats.dailyNetPnlPct <= -cfg.maxDailyLossPct) problems.push(`daily net loss ${stats.dailyNetPnlPct.toFixed(1)}% beyond the daily limit ${cfg.maxDailyLossPct}%`);
   const inferenceCommittedUsd = finite(stats.inferenceBudgetCommittedUsd) ? stats.inferenceBudgetCommittedUsd : stats.inferenceTodayUsd;
   if (finite(inferenceCommittedUsd) && inferenceCommittedUsd >= cfg.inferenceBudgetUsdPerDay) problems.push(`inference budget commitment $${inferenceCommittedUsd.toFixed(2)} at the daily budget $${cfg.inferenceBudgetUsdPerDay}`);
   if (stats.switchesToday >= cfg.maxSwitchesPerDay) problems.push(`switches today ${stats.switchesToday} at the daily maximum`);

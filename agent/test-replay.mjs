@@ -86,6 +86,22 @@ test('features on a replay snapshot: trade activity and spread unknown, data not
   assert.match(text, /Trade activity: unavailable trades per minute/u);
 });
 
+test('breakout range at a tick on a candle boundary: the candle that just closed (and holds the current price) is not part of the range', () => {
+  const { minutes, fives } = synthetic({ fromMs: T0, hours: 27, price: () => 3000 });
+  // the last minute of the window prints far below everything before it: a breakout, if the range is the candles BEFORE it
+  const now = T0 + 26 * 3600_000 + 2 * CANDLE_MS; // a candle boundary
+  const dropped = minutes.map((m) => (m.t >= now - CANDLE_MS ? { ...m, open: 2900, high: 2900, low: 2850, close: 2850 } : m));
+  const droppedFives = fives.map((c) => (c.t === now - CANDLE_MS ? { ...c, open: 2900, high: 2900, low: 2850, close: 2850 } : c));
+  const feed = new ReplayFeed({ minutes: dropped, fiveMinutes: droppedFives });
+  feed.advanceTo(now);
+  const snap = feed.snapshot(now);
+  assert.equal(snap.last.p, 2850); assert.equal(snap.candles[snap.candles.length - 1].t, now - CANDLE_MS, 'the just-closed candle is in the context');
+  const f = computeFeatures(snap, null, now);
+  assert.ok(f.range2h.low > 2990, `the range excludes the candle the price printed in: low ${f.range2h.low}`);
+  assert.equal(f.range2h.candles, 23, 'two hours of candles minus the one holding the price');
+  assert.ok(f.price <= f.range2h.low * (1 - 0.9 / 100), 'so a 0.9 % breakout below the range is possible at a five-minute tick');
+});
+
 test('the hidden-date state: the same text as live with only the time line replaced; no calendar date reaches the models', () => {
   const { minutes, fives } = synthetic({ fromMs: T0, hours: 27, price: () => 3000 });
   const feed = new ReplayFeed({ minutes, fiveMinutes: fives });

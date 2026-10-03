@@ -106,13 +106,14 @@ export function computeFeatures(snapshot, quotes, now = Date.now()) {
   const hi24 = dayComplete ? Math.max(...day.map((c) => c.high)) : null;
   const lo24 = dayComplete ? Math.min(...day.map((c) => c.low)) : null;
   const rangePos = hi24 !== null && lo24 !== null && hi24 > lo24 ? ((price - lo24) / (hi24 - lo24)) * 100 : null;
-  // the high and low of the CLOSED candles of the last N minutes (the candle still forming is left out, so a price
-  // beyond the range is new information, not the candle's own extreme); null unless the window is fresh,
-  // contiguous and at least 80 % populated. Read by the optional breakout condition (BREAKOUT_MIN_PCT).
+  // the high and low of the CLOSED candles of the last N minutes that do not contain the current price: the candle
+  // still forming is left out, and so is a candle that closed at the very instant the price was printed (a replay
+  // ticking on candle boundaries), so a price beyond the range is new information, not the candle's own extreme;
+  // null unless the window is fresh, contiguous and at least 80 % populated. Read by the optional breakout condition.
   const rangeOver = (minutes) => {
     if (!candlesFresh || !snapshot.candlesContiguous) return null;
     const from = now - minutes * 60_000;
-    const closed = candles.filter((c) => c.t >= from && c.t <= now - CANDLE_MS);
+    const closed = candles.filter((c) => c.t >= from && c.t + CANDLE_MS < last.t);
     if (closed.length < Math.ceil((minutes / 5) * 0.8)) return null;
     return { minutes, high: Math.max(...closed.map((c) => c.high)), low: Math.min(...closed.map((c) => c.low)), candles: closed.length };
   };

@@ -81,7 +81,8 @@ test('VOTE_ACCEPT_QUALITY is a risk-profile knob: good only by default, a subset
 });
 
 test('the virtual capital accepts a size ladder up to one million and refuses more', () => {
-  assert.equal(makeCfg({ PAPER_CAPITAL_USD: '1000000' }).paperCapitalUsd, 1_000_000);
-  assert.equal(makeCfg({ PAPER_CAPITAL_USD: '1000000' }).maxCapitalUsd, 2_000_000);
-  assert.throws(() => makeCfg({ PAPER_CAPITAL_USD: '1000001' }), /PAPER_CAPITAL_USD/u);
+  const big = loadConfig(env({ PAPER_CAPITAL_USD: '1000000' }));
+  assert.equal(big.paperCapitalUsd, 1_000_000);
+  assert.equal(big.maxCapitalUsd, 2_000_000);
+  assert.throws(() => loadConfig(env({ PAPER_CAPITAL_USD: '1000001' })), /PAPER_CAPITAL_USD/u);
 });

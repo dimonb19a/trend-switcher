@@ -27,7 +27,7 @@ import { openLedger } from './ledger.mjs';
 import { createEngine } from './engine.mjs';
 import * as deepseek from './deepseek.mjs';
 import { ReplayFeed, MINUTE_MS } from './replay-feed.mjs';
-import { createReplayChain, IMPACT_TABLE_BPS, POOL_FEE_PCT } from './replay-chain.mjs';
+import { createReplayChain, IMPACT_TABLE_BPS } from './replay-chain.mjs';
 import { createReplayJudge, renderStateHiddenDate, HIDDEN_TIME_LINE } from './replay-judge.mjs';
 import { gapsOf, readHistory, sha256File } from './history-fetch.mjs';
 import { RecordableError, describeError } from './errors.mjs';
@@ -54,7 +54,7 @@ export function liftDailyLatchAtMidnight(ledger, mode = 'paper') {
  */
 export async function runReplay({
   cfg = defaultCfg, minutes, fiveMinutes, fromMs, toMs, warmupMs = 26 * 3600_000,
-  judge, slowBrain = deepseek, judgeEnabled = true, log = () => {}, onTick = null, meta = {}, keepLedgerOpen = false,
+  judge, slowBrain = deepseek, judgeEnabled = true, log = () => {}, onTick = null, meta = {}, keepLedgerOpen = false, impactTable = null,
 }) {
   const tickMs = cfg.tickMs;
   if (cfg.mode !== 'paper') throw new RecordableError('a replay is paper only');
@@ -64,14 +64,18 @@ export async function runReplay({
   if (fromMs % tickMs !== 0) throw new RecordableError('the window start must be aligned to the tick');
   if (minutes[0].t > fromMs - warmupMs) throw new RecordableError(`the minute history starts at ${new Date(minutes[0].t).toISOString()}, after the warm-up start ${new Date(fromMs - warmupMs).toISOString()}`);
   if (minutes[minutes.length - 1].t + MINUTE_MS < toMs) throw new RecordableError('the minute history ends before the window does');
+  // the measured price impact belongs to one pool: another market brings its own table (agent/probe-impact.mjs → REPLAY_IMPACT_TABLE_BPS)
+  const defaultMarket = cfg.market?.name === 'base-eth-usdc' && cfg.market?.tested === true;
+  if (!defaultMarket && impactTable === null) throw new RecordableError(`market ${cfg.market?.name}: a replay needs this pool's price impact table (REPLAY_IMPACT_TABLE_BPS, measured with agent/probe-impact.mjs); the default table was measured on Base WETH/USDC`);
+  const table = impactTable ?? IMPACT_TABLE_BPS;
 
   let now = fromMs - warmupMs;
   const clock = () => now; // the one clock of the engine and the ledger (R1-A), simulated
   const ledger = openLedger(cfg, { clock });
   let keep = false;
   try {
-    const feed = new ReplayFeed({ minutes, fiveMinutes });
-    const chain = createReplayChain({ minutes, clock, cfg });
+    const feed = new ReplayFeed({ minutes, fiveMinutes, product: cfg.product });
+    const chain = createReplayChain({ minutes, clock, cfg, impactTable: table });
     const engine = createEngine({
       cfg, armed: false, chain, ledger, feed, judge, slowBrain, arms: null, clock, log,
       judgeEnabled, canAct: () => true, captureInputs: false, renderState: renderStateHiddenDate,
@@ -87,7 +91,8 @@ export async function runReplay({
       replay: {
         kind: 'historical replay', warmupHours: warmupMs / 3600_000, hiddenDateLine: HIDDEN_TIME_LINE,
         fill: 'open of the minute that starts at the decision instant, times the scenario; the engine adds its expected slippage',
-        costScenario: { poolFeePct: POOL_FEE_PCT, impactBpsByNotionalUsd: IMPACT_TABLE_BPS.map(([n, b]) => ({ notionalUsd: n, bps: b })), measuredOn: '2026-10-02 Base WETH/USDC 0.05 % QuoterV2 round trips' },
+        market: cfg.market?.name ?? null,
+        costScenario: { poolFeePct: cfg.poolFee / 10_000, impactBpsByNotionalUsd: table.map(([n, b]) => ({ notionalUsd: n, bps: b })), measuredOn: impactTable === null ? '2026-10-02 Base WETH/USDC 0.05 % QuoterV2 round trips' : 'REPLAY_IMPACT_TABLE_BPS (operator-supplied)' },
         midnightRule: 'a latched daily loss limit is lifted at the next simulated UTC midnight; kill and switch-level halts never',
         dailyLatchLifts: 0, syntheticCandles: 0, missingMinutes: 0, judgeErrors: 0, wallSeconds: null, ...meta,
       },
@@ -148,6 +153,11 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   if (!args['no-judge'] && (!defaultCfg.judgeBaseUrl || !defaultCfg.judgeModel)) refuse('the judge endpoint and model pin are required (JUDGE_BASE_URL, JUDGE_MODEL) unless --no-judge');
   if ([defaultCfg.databasePath, `${defaultCfg.databasePath}-wal`, `${defaultCfg.databasePath}-shm`].some(existsSync)) refuse('choose a fresh AGENT_DB_PATH');
   if (defaultCfg.requireDeepseek && !defaultCfg.hasDeepseekKey) refuse('REQUIRE_DEEPSEEK=true without a slow-brain key; set REQUIRE_DEEPSEEK=false for a judge-only replay');
+  let impactTable = null;
+  if (process.env.REPLAY_IMPACT_TABLE_BPS) {
+    try { impactTable = JSON.parse(process.env.REPLAY_IMPACT_TABLE_BPS); } catch { refuse('REPLAY_IMPACT_TABLE_BPS is not JSON'); }
+    if (!Array.isArray(impactTable) || impactTable.length < 2 || impactTable.some((p, i) => !Array.isArray(p) || p.length !== 2 || !(p[0] > 0) || !(p[1] >= 0) || (i > 0 && !(p[0] > impactTable[i - 1][0])))) refuse('REPLAY_IMPACT_TABLE_BPS must be [[notionalUsd, bps], ...] with rising notionals');
+  }
   const minutes = readHistory(resolve(args.minutes)); const fiveMinutes = readHistory(resolve(args.candles));
   const judge = createReplayJudge();
   if (!args['no-judge'] && judge.keyStatus() !== 'set') refuse('the judge key is not set');
@@ -162,7 +172,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   let lastLogAt = Date.now();
   try {
     await runReplay({
-      minutes, fiveMinutes, fromMs, toMs, warmupMs: Number(args['warmup-hours']) * 3600_000, judge, judgeEnabled: !args['no-judge'], meta,
+      minutes, fiveMinutes, fromMs, toMs, warmupMs: Number(args['warmup-hours']) * 3600_000, judge, judgeEnabled: !args['no-judge'], meta, impactTable,
       log: (m, extra) => { if (!/^tick /u.test(m)) log(m, extra); },
       onTick: ({ index, t, out }) => { if (Date.now() - lastLogAt > 60_000 || index === 0) { lastLogAt = Date.now(); log(`progress ${new Date(t).toISOString()} slot ${index}`, out?.switched !== undefined ? { switched: out.switched } : undefined); } },
     });

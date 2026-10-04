@@ -124,7 +124,7 @@ export function createEngine(deps) {
   /** How much of a leg's input token the FRESH balances make available, in raw units (R3-V1). */
   function availableRaw(position, send) {
     if (mode === 'paper') {
-      return send.label === 'USDC' ? parseUnits(position.paper.usdc.toFixed(6), 6) : parseUnits(position.paper.ethSide.toFixed(18), 18);
+      return send.label === 'USDC' ? parseUnits(position.paper.usdc.toFixed(cfg.quoteDecimals), cfg.quoteDecimals) : parseUnits(position.paper.ethSide.toFixed(cfg.baseDecimals), cfg.baseDecimals);
     }
     if (send.label === 'ETH') return parseUnits(position.nativeSurplus.toFixed(18), 18);
     if (send.label === 'WETH') return position.real.wethRaw;
@@ -315,7 +315,7 @@ export function createEngine(deps) {
     const paper = ledger.kv.get('paper:balances');
     const sell = target === 'USDC';
     if (sell ? !(paper?.ethSide > 0) : !(paper?.usdc > 0)) return refuse(sell ? 'nothing to sell' : 'nothing to buy with');
-    const send = sell ? { label: 'ETH', amountIn: paper.ethSide, amountInRaw: parseUnits(paper.ethSide.toFixed(18), 18) } : { label: 'USDC', amountIn: paper.usdc, amountInRaw: parseUnits(paper.usdc.toFixed(6), 6) };
+    const send = sell ? { label: 'ETH', amountIn: paper.ethSide, amountInRaw: parseUnits(paper.ethSide.toFixed(cfg.baseDecimals), cfg.baseDecimals) } : { label: 'USDC', amountIn: paper.usdc, amountInRaw: parseUnits(paper.usdc.toFixed(cfg.quoteDecimals), cfg.quoteDecimals) };
     // gather: the execution quote for exactly this amount, then the balances
     const q = await chain.quote(sell ? cfg.weth : cfg.usdc, sell ? cfg.usdc : cfg.weth, send.amountInRaw);
     const balances = await readBalances();
@@ -323,7 +323,7 @@ export function createEngine(deps) {
     const pf = admissible({ stage: 'paper fill', target, position: balances, switchId, quote: q, send });
     if (!pf.ok) return refuse(`before the paper fill: ${pf.problems.join('; ')}`);
     const slip = 1 - cfg.expectedSlippageBps / 10_000;
-    const quoteOut = sell ? Number(formatUnits(q.amountOut, 6)) : Number(formatEther(q.amountOut));
+    const quoteOut = sell ? Number(formatUnits(q.amountOut, cfg.quoteDecimals)) : Number(formatUnits(q.amountOut, cfg.baseDecimals));
     const out = quoteOut * slip;
     const fresh = balances.paper;
     ledger.transaction(() => {
@@ -527,7 +527,7 @@ export function createEngine(deps) {
       // balances valued at the tape's price NOW, after the wait that billed it, not at the tick's entry (R4-E4)
       const afterCost = (where) => { const v = revalue(position); st = noteRisk(ledger.stats(v.walletUsd), v.walletUsd, where, {}, v.note); };
       if (!features) { ledger.insertEquity({ eth: position.real.eth, weth: position.weth, usdc: position.usdc, price, equityUsd: position.equityUsd, walletUsd: position.walletUsd }); log('tape stale, no features', { eventAgeSec: Math.round(snap.eventAgeMs / 1000) }); votes.clear(); return { stale: true }; }
-      const stateText = renderState(features, { side: position.side, ethPct: position.ethPct, lastSwitchMinutes: st.lastSwitchAt ? (now - st.lastSwitchAt) / 60_000 : null, switchesToday: st.switchesToday, maxSwitchesPerDay: cfg.maxSwitchesPerDay });
+      const stateText = renderState(features, { side: position.side, ethPct: position.ethPct, lastSwitchMinutes: st.lastSwitchAt ? (now - st.lastSwitchAt) / 60_000 : null, switchesToday: st.switchesToday, maxSwitchesPerDay: cfg.maxSwitchesPerDay }, cfg.market);
 
       // 1) the fast judge, within the inference budget
       let summary = null; let judgment = null; let judgeError = null;

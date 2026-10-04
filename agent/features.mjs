@@ -3,7 +3,7 @@
 // pre-computed lines. A horizon that the data does not cover continuously
 // yields null and is rendered as "unavailable" (TR-06): unknown is never
 // reported as "the market is quiet".
-import { FEATURE_SCHEMA, cfg } from './config.mjs';
+import { FEATURE_SCHEMA, cfg, feePctText } from './config.mjs';
 import { TAPE_GAP_MS } from './feed.mjs';
 
 const CANDLE_MS = 300_000;
@@ -177,15 +177,16 @@ const f = (v, digits = 2, suffix = '') => (!finite(v) ? 'unavailable' : `${v >= 
 const money = (v) => (!finite(v) ? 'unavailable' : v.toFixed(2));
 
 /** Plain-text state for the judge. English, one fact per line, no secrets, no absolute balances, no addresses. */
-export function renderState(features, position) {
+export function renderState(features, position, market = cfg.market) {
   const x = features;
+  const m = market; const fee = feePctText(m.poolFee); // the default market renders byte-identically to the text of every recorded session
   const trend = x.emaSpreadPct === null ? 'unavailable' : `EMA20 is ${x.emaSpreadPct >= 0 ? 'above' : 'below'} EMA50 by ${Math.abs(x.emaSpreadPct).toFixed(2)}%`;
   const cost = x.quotes && finite(x.quotes.costPct)
-    ? `switching the whole position costs about ${x.quotes.costPct.toFixed(2)}% (pool fee 0.05% + price impact ${x.quotes.impactBps.toFixed(1)} bps + expected slippage ${x.quotes.expectedSlippagePct.toFixed(2)}%); the code rejects any fill worse than ${x.quotes.tolerancePct.toFixed(2)}% from the quote; gas is negligible`
+    ? `switching the whole position costs about ${x.quotes.costPct.toFixed(2)}% (pool fee ${fee}% + price impact ${x.quotes.impactBps.toFixed(1)} bps + expected slippage ${x.quotes.expectedSlippagePct.toFixed(2)}%); the code rejects any fill worse than ${x.quotes.tolerancePct.toFixed(2)}% from the quote; gas is negligible`
     : 'switching cost estimate unavailable (assume about 0.10%)';
   const quality = x.dataQuality.degraded ? `DEGRADED: ${x.dataQuality.reasons.join('; ')}` : 'good';
   return [
-    'Market: ETH-USD spot tape from Coinbase; execution on Base, Uniswap v3 WETH/USDC 0.05% pool.',
+    `Market: ${m.product} spot tape from Coinbase; execution on ${m.chain}, Uniswap v3 ${m.baseToken}/${m.quoteToken} ${fee}% pool.`,
     `Time (UTC): ${new Date(x.now).toISOString().replace('T', ' ').slice(0, 19)}.`,
     `Data quality: ${quality}. Tape event age ${f(x.tapeEventAgeSec, 0)} s, continuous tape for the last ${x.tapeCoverageMinutes} min; candles ${x.candlesSource ?? 'unavailable'}, newest closed ${f(x.candlesEventAgeSec === null ? null : x.candlesEventAgeSec / 60, 0)} min ago. "unavailable" means the data does not cover that horizon; do not treat it as calm.`,
     `Price: ${money(x.price)} USD. Bid/ask spread: ${f(x.spreadBps, 1)} bps. Trade activity: ${f(x.tickRate, 0)} trades per minute over the last 5 minutes.`,
@@ -194,6 +195,6 @@ export function renderState(features, position) {
     `Trend on 5-minute candles: EMA20 ${money(x.ema20)}, EMA50 ${money(x.ema50)}; ${trend}; EMA20 slope over the last hour ${f(x.emaSlopePct, 2, '%')}.`,
     `24h range: low ${money(x.lo24)}, high ${money(x.hi24)}; the price sits at ${f(x.rangePos, 0)}% of the range (0% = low, 100% = high). Volume in the last hour is ${f(x.volumeRatio, 2)}x the median hour of the day.`,
     `Execution cost: ${cost}. A switch only pays off if the price then moves more than that cost in the intended direction.`,
-    `Position: ${position.side === 'ETH' ? 'in ETH' : position.side === 'USDC' ? 'in USDC (stablecoin, out of the market)' : 'mixed'} (${position.ethPct.toFixed(0)}% ETH / ${(100 - position.ethPct).toFixed(0)}% USDC of the pilot capital). Last switch: ${position.lastSwitchMinutes === null ? 'none yet' : `${position.lastSwitchMinutes.toFixed(0)} minutes ago`}. Switches today: ${position.switchesToday} of ${position.maxSwitchesPerDay} allowed.`,
+    `Position: ${position.side === 'ETH' ? `in ${m.asset}` : position.side === 'USDC' ? `in ${m.quoteToken} (stablecoin, out of the market)` : 'mixed'} (${position.ethPct.toFixed(0)}% ${m.asset} / ${(100 - position.ethPct).toFixed(0)}% ${m.quoteToken} of the pilot capital). Last switch: ${position.lastSwitchMinutes === null ? 'none yet' : `${position.lastSwitchMinutes.toFixed(0)} minutes ago`}. Switches today: ${position.switchesToday} of ${position.maxSwitchesPerDay} allowed.`,
   ].join('\n');
 }

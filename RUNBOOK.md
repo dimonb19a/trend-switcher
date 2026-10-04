@@ -79,8 +79,11 @@ Paper fills have no on-chain effect, so the sessions cannot trade against each o
 2. Run one arm per process on a fresh `AGENT_DB_PATH`, with the judge environment of a paper
    session, `MODE=paper`, `PAPER_CAPITAL_USD`, `TICK_MS` of 60000 or 300000 and
    `REQUIRE_DEEPSEEK=false` unless you give the slow brain a key (it then sees the same hidden-date
-   state). Strategy knobs are the usual ones (`RISK_PRESET`, `BREAKOUT_MIN_PCT`, `VOTE_*`,
-   `MAX_DAILY_LOSS_PCT`). `--no-judge` walks the whole path without a model call.
+   state). Strategy knobs are the usual ones (`STRATEGY`, `RISK_PRESET`, `BREAKOUT_MIN_PCT`, `REENTRY`,
+   `VOTE_*`, `MAX_DAILY_LOSS_PCT`). `--no-judge` walks the whole path without a model call. Another
+   market (`MARKET`, README: Markets) needs its candles (`history-fetch.mjs --product ARB-USD`) and
+   its pool's price impact: `node agent/probe-impact.mjs` prints the table, `REPLAY_IMPACT_TABLE_BPS`
+   hands it to the replay, which refuses to start on another market without it.
 3. The runner logs a progress line a minute and the switches; `node agent/replay-report.mjs --db
    <ledger> [--db <ledger> ...]` prints each arm against hold and a comparison table. Keep the ledgers
    and the history files' hashes with the result; the manifest in the ledger (`session:paper`)

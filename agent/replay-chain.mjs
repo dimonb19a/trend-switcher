@@ -1,9 +1,9 @@
 // The chain of a replay: no network, no signer, no wallet — a cost scenario instead of a quoter.
 // The fill of a switch decided at the simulated instant T is the OPEN of the minute that starts at T
 // (the first price observed after the decision) times the scenario; the decision itself only ever
-// saw the close of the minute before. The pool fee is the pool's (0.05 %); the price impact is the
-// one measured on the Base WETH/USDC pool on 2026-10-02 with round-trip quotes at four sizes, read
-// at the notional of the switch; the engine applies its expected slippage on top, as live. Nothing
+// saw the close of the minute before. The pool fee is the market's pool fee; the price impact is, by
+// default, the one measured on the Base WETH/USDC pool on 2026-10-02 with round-trip quotes at four
+// sizes (another market brings its own table, agent/probe-impact.mjs), read at the notional of the switch; the engine applies its expected slippage on top, as live. Nothing
 // here knows the historical liquidity of a pool that did not exist: the numbers are a scenario, and
 // the report says so.
 import { formatEther, formatUnits, parseUnits } from 'ethers';
@@ -40,10 +40,11 @@ export class ReplayQuoteError extends RecordableError {
   }
 }
 
-export function createReplayChain({ minutes, clock, cfg = defaultCfg, impactBps = null }) {
+export function createReplayChain({ minutes, clock, cfg = defaultCfg, impactBps = null, impactTable = IMPACT_TABLE_BPS }) {
   const byStart = new Map(minutes.map((r) => [r.t, r]));
-  const impact = (notionalUsd) => (impactBps === null ? impactBpsFor(notionalUsd) : impactBps);
-  const oneWay = (notionalUsd) => POOL_FEE_PCT / 100 + impact(notionalUsd) / 10_000; // a fraction of the price
+  const feePct = cfg.poolFee / 10_000; // the market's pool fee: 500 → 0.05 %
+  const impact = (notionalUsd) => (impactBps === null ? impactBpsFor(notionalUsd, impactTable) : impactBps);
+  const oneWay = (notionalUsd) => feePct / 100 + impact(notionalUsd) / 10_000; // a fraction of the price
   const calls = { quotes: 0, costPictures: 0 };
 
   /** The first price observed after the simulated instant: the open of the minute that starts there. */
@@ -69,19 +70,19 @@ export function createReplayChain({ minutes, clock, cfg = defaultCfg, impactBps 
       return {
         at: clock(), impactBps: bps,
         expectedSlippagePct: cfg.expectedSlippageBps / 100, tolerancePct: cfg.slippageBps / 100,
-        costPct: POOL_FEE_PCT + bps / 100 + cfg.expectedSlippageBps / 100,
+        costPct: feePct + bps / 100 + cfg.expectedSlippageBps / 100,
         sellQuotePrice: midPrice * (1 - w), buyQuotePrice: midPrice * (1 + w), block: null, scenario: 'replay',
       };
     },
     async quote(tokenIn, tokenOut, amountInRaw) {
       calls.quotes += 1;
       const sell = tokenOut === cfg.usdc;
-      const amountIn = sell ? Number(formatEther(amountInRaw)) : Number(formatUnits(amountInRaw, 6));
+      const amountIn = sell ? Number(formatUnits(amountInRaw, cfg.baseDecimals)) : Number(formatUnits(amountInRaw, cfg.quoteDecimals));
       const price = fillPriceAt(clock());
       const notional = sell ? amountIn * price : amountIn;
       const w = oneWay(notional);
       const out = sell ? amountIn * price * (1 - w) : amountIn / (price * (1 + w));
-      return { amountOut: sell ? parseUnits(out.toFixed(6), 6) : parseUnits(out.toFixed(18), 18), gasEstimate: 0n, at: clock(), block: null, source: 'replay-scenario', fillPrice: price, impactBps: impact(notional) };
+      return { amountOut: sell ? parseUnits(out.toFixed(cfg.quoteDecimals), cfg.quoteDecimals) : parseUnits(out.toFixed(cfg.baseDecimals), cfg.baseDecimals), gasEstimate: 0n, at: clock(), block: null, source: 'replay-scenario', fillPrice: price, impactBps: impact(notional) };
     },
     minOut: (v) => (v * BigInt(10_000 - cfg.slippageBps)) / 10_000n,
     feeCaps: notImplemented('feeCaps'), nonceState: notImplemented('nonceState'), allowance: notImplemented('allowance'),

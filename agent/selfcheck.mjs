@@ -7,7 +7,7 @@
 import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
-import { Contract, Interface, JsonRpcProvider, parseEther } from 'ethers';
+import { Contract, Interface, JsonRpcProvider, formatUnits, parseEther, parseUnits } from 'ethers';
 import * as judgeClient from './judge-client.mjs';
 import { RecordableError, describeError  } from './errors.mjs';
 
@@ -58,27 +58,50 @@ await check('judge key, endpoint policy and prices (status only, nothing sent)',
 
 const provider = new JsonRpcProvider(cfg.rpcUrl, cfg.chainId, { staticNetwork: true });
 
-await check('router is SwapRouter02 for WETH on Base', async () => {
-  const weth = await new Contract(cfg.router, ['function WETH9() view returns (address)'], provider).WETH9();
-  if (weth.toLowerCase() !== cfg.weth.toLowerCase()) throw new RecordableError(`router WETH9 is ${weth}`);
-  return `WETH9 ${weth}`;
+const m = cfg.market;
+const liveWired = m.tested === true && m.name === 'base-eth-usdc'; // the live path (native-value swaps, the L1 fee oracle, balances) is wired for this market only
+
+await check(`market ${m.name}: ${m.asset} against ${m.quoteToken} on ${m.chain}, Uniswap v3 ${m.baseToken}/${m.quoteToken} ${cfg.poolFee / 10_000}% (${m.tested ? 'traded in this repository' : 'supported, not tested: paper only'})`, async () => {
+  const id = BigInt(await provider.send('eth_chainId', []));
+  if (id !== BigInt(cfg.chainId)) throw new RecordableError(`the RPC serves chain ${id}, the market needs ${cfg.chainId}`);
+  return `chain id ${id}`;
 });
 
-await check('pool is WETH/USDC with the configured fee tier', async () => {
+await check('router and quoter belong to the market\'s factory; the router wraps the chain\'s native token', async () => {
+  const abi = ['function factory() view returns (address)', 'function WETH9() view returns (address)'];
+  // one call at a time: public endpoints rate-limit bursts
+  const rf = await new Contract(cfg.router, abi, provider).factory(); const rw = await new Contract(cfg.router, abi, provider).WETH9(); const qf = await new Contract(cfg.quoter, abi, provider).factory();
+  if (rf.toLowerCase() !== m.factory.toLowerCase() || qf.toLowerCase() !== m.factory.toLowerCase()) throw new RecordableError(`factories: router ${rf}, quoter ${qf}, expected ${m.factory}`);
+  if (rw.toLowerCase() !== m.wrappedNative.toLowerCase()) throw new RecordableError(`router WETH9 is ${rw}`);
+  return `factory ${rf}; WETH9 ${rw}`;
+});
+
+await check('tokens are what the market says (symbol and decimals, on-chain)', async () => {
+  const abi = ['function symbol() view returns (string)', 'function decimals() view returns (uint8)'];
+  const base = new Contract(cfg.weth, abi, provider); const quote = new Contract(cfg.usdc, abi, provider);
+  const bs = await base.symbol(); const bd = await base.decimals(); const qs = await quote.symbol(); const qd = await quote.decimals();
+  if (Number(bd) !== cfg.baseDecimals || Number(qd) !== cfg.quoteDecimals) throw new RecordableError(`decimals ${bs} ${bd} / ${qs} ${qd}, configured ${cfg.baseDecimals} / ${cfg.quoteDecimals}`);
+  if (bs !== m.baseToken || qs !== m.quoteToken) throw new RecordableError(`symbols ${bs}/${qs}, configured ${m.baseToken}/${m.quoteToken}`);
+  return `${bs} (${bd}) / ${qs} (${qd})`;
+});
+
+await check('pool is the factory\'s pool of the pair at the configured fee tier', async () => {
   const pool = new Contract(cfg.pool, ['function token0() view returns (address)', 'function token1() view returns (address)', 'function fee() view returns (uint24)'], provider);
-  const [t0, t1, fee] = await Promise.all([pool.token0(), pool.token1(), pool.fee()]);
+  const t0 = await pool.token0(); const t1 = await pool.token1(); const fee = await pool.fee();
   const set = new Set([t0.toLowerCase(), t1.toLowerCase()]);
   if (!set.has(cfg.weth.toLowerCase()) || !set.has(cfg.usdc.toLowerCase())) throw new RecordableError(`pool tokens ${t0}/${t1}`);
   if (Number(fee) !== cfg.poolFee) throw new RecordableError(`pool fee ${fee}`);
+  const fromFactory = await new Contract(m.factory, ['function getPool(address,address,uint24) view returns (address)'], provider).getPool(cfg.weth, cfg.usdc, cfg.poolFee);
+  if (fromFactory.toLowerCase() !== cfg.pool.toLowerCase()) throw new RecordableError(`the factory's pool is ${fromFactory}`);
   return `fee ${fee}`;
 });
 
-await check('quoter answers for a 0.004 WETH sale', async () => {
+await check('quoter answers for a 10-dollar buy', async () => {
   const quoter = new Contract(cfg.quoter, ['function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96)) returns (uint256 amountOut,uint160,uint32,uint256)'], provider);
-  const q = await quoter.quoteExactInputSingle.staticCall({ tokenIn: cfg.weth, tokenOut: cfg.usdc, amountIn: parseEther('0.004'), fee: cfg.poolFee, sqrtPriceLimitX96: 0n });
-  const usdc = Number(q.amountOut) / 1e6;
-  if (!(usdc > 1)) throw new RecordableError(`amountOut ${usdc}`);
-  return `${usdc.toFixed(4)} USDC (${(usdc / 0.004).toFixed(2)} per ETH)`;
+  const q = await quoter.quoteExactInputSingle.staticCall({ tokenIn: cfg.usdc, tokenOut: cfg.weth, amountIn: parseUnits('10', cfg.quoteDecimals), fee: cfg.poolFee, sqrtPriceLimitX96: 0n });
+  const out = Number(formatUnits(q.amountOut, cfg.baseDecimals));
+  if (!(out > 0)) throw new RecordableError(`amountOut ${out}`);
+  return `${out.toPrecision(6)} ${m.baseToken} for 10 ${m.quoteToken} (${(10 / out).toFixed(4)} per ${m.asset}, fee included)`;
 });
 
 const inner = new Interface(['function exactInputSingle((address tokenIn,address tokenOut,uint24 fee,address recipient,uint256 amountIn,uint256 amountOutMinimum,uint160 sqrtPriceLimitX96)) payable returns (uint256)']);
@@ -88,6 +111,7 @@ const probeFrom = cfg.accountAddress ?? '0x0000000000000000000000000000000000000
 const probeCall = inner.encodeFunctionData('exactInputSingle', [{ tokenIn: cfg.weth, tokenOut: cfg.usdc, fee: cfg.poolFee, recipient: probeFrom, amountIn: probeAmount, amountOutMinimum: 0n, sqrtPriceLimitX96: 0n }]);
 
 await check('deadline-bearing multicall swap is accepted with a fresh deadline (estimateGas only, nothing sent)', async () => {
+  if (!liveWired) return `skipped: the live path is wired for base-eth-usdc only (market ${m.name} runs in paper)`;
   if (!cfg.accountAddress) return 'skipped: no ACCOUNT_ADDRESS (paper on a virtual capital)';
   const balance = await provider.getBalance(cfg.accountAddress);
   if (balance < probeAmount * 2n) return 'skipped: wallet balance too small for the probe';
@@ -97,6 +121,7 @@ await check('deadline-bearing multicall swap is accepted with a fresh deadline (
 });
 
 await check('the router refuses an EXPIRED deadline (Transaction too old)', async () => {
+  if (!liveWired) return `skipped: the live path is wired for base-eth-usdc only (market ${m.name} runs in paper)`;
   if (!cfg.accountAddress) return 'skipped: no ACCOUNT_ADDRESS (paper on a virtual capital)';
   const balance = await provider.getBalance(cfg.accountAddress);
   if (balance < probeAmount * 2n) return 'skipped: wallet balance too small for the probe';
@@ -107,6 +132,7 @@ await check('the router refuses an EXPIRED deadline (Transaction too old)', asyn
 });
 
 await check('Base L1 data fee oracle answers and the transaction bound is priced (gas limit × fee cap + L1 upper bound)', async () => {
+  if (!liveWired) return `skipped: the live path is wired for base-eth-usdc only (market ${m.name} runs in paper)`;
   if (!cfg.accountAddress) return 'skipped: no ACCOUNT_ADDRESS (paper on a virtual capital; live pricing needs a funded wallet)';
   const chain = await import('./chain.mjs');
   const tx = chain.buildSwapTx({ tokenIn: cfg.weth, tokenOut: cfg.usdc, amountInRaw: probeAmount, minOutRaw: 0n, recipient: cfg.accountAddress, deadline: Math.floor(Date.now() / 1000) + 60, useValue: true });
@@ -115,6 +141,7 @@ await check('Base L1 data fee oracle answers and the transaction bound is priced
 });
 
 await check('wallet balances on Base (public address, no key)', async () => {
+  if (!liveWired) return `skipped: the live path is wired for base-eth-usdc only (market ${m.name} runs in paper)`;
   if (!cfg.accountAddress) return 'skipped: no ACCOUNT_ADDRESS (paper on a virtual capital)';
   const chain = await import('./chain.mjs');
   const b = await chain.balances(cfg.accountAddress);
@@ -122,7 +149,7 @@ await check('wallet balances on Base (public address, no key)', async () => {
 });
 
 await check('Coinbase candles endpoint answers (keyless)', async () => {
-  const response = await fetch('https://api.exchange.coinbase.com/products/ETH-USD/candles?granularity=300', { signal: AbortSignal.timeout(15_000) });
+  const response = await fetch(`https://api.exchange.coinbase.com/products/${cfg.product}/candles?granularity=300`, { signal: AbortSignal.timeout(15_000) });
   if (!response.ok) throw new RecordableError(`HTTP ${response.status}`);
   return `${(await response.json()).length} candles`;
 });

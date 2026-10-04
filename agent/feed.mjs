@@ -18,8 +18,9 @@ const CANDLE_MS = 300_000;
 const finite = (v) => Number.isFinite(v);
 
 export class Feed {
-  constructor({ product = cfg.product, log = () => {}, clock = () => Date.now() } = {}) {
+  constructor({ product = cfg.product, binanceSymbol = cfg.market?.binanceSymbol ?? null, log = () => {}, clock = () => Date.now() } = {}) {
     this.product = product;
+    this.binanceSymbol = binanceSymbol; // the fallback for the candles when Coinbase REST fails; null = no fallback
     this.log = log;
     this.clock = clock;
     this.ticks = [];          // { t (event ms), rt (receive ms), p, bid, ask, size }
@@ -172,19 +173,20 @@ export class Feed {
       const now = this.clock();
       const closed = rows.map(([time, low, high, open, close, volume]) => ({ t: time * 1000, open, high, low, close, volume }))
         .filter((c) => c.t + CANDLE_MS <= now);
-      this.acceptCandles(closed, 'coinbase:ETH-USD');
+      this.acceptCandles(closed, `coinbase:${this.product}`);
       return;
     } catch (error) {
       this.log('coinbase candles failed, trying binance fallback', { error: error.message });
     }
-    const response = await fetch(`${BINANCE_URL}?symbol=ETHUSDT&interval=5m&limit=300`, { signal: AbortSignal.timeout(15_000) });
+    if (!this.binanceSymbol) throw new RecordableError(`coinbase candles failed and market ${cfg.market?.name ?? ''} has no fallback`);
+    const response = await fetch(`${BINANCE_URL}?symbol=${this.binanceSymbol}&interval=5m&limit=300`, { signal: AbortSignal.timeout(15_000) });
     if (!response.ok) throw new RecordableError(`binance klines HTTP ${response.status}`);
     const rows = await response.json();
     if (!Array.isArray(rows)) throw new RecordableError('binance klines: not an array');
     const now = this.clock();
     const closed = rows.map((r) => ({ t: r[0], open: Number(r[1]), high: Number(r[2]), low: Number(r[3]), close: Number(r[4]), volume: Number(r[5]) }))
       .filter((c) => c.t + CANDLE_MS <= now);
-    this.acceptCandles(closed, 'binance:ETHUSDT-fallback');
+    this.acceptCandles(closed, `binance:${this.binanceSymbol}-fallback`);
   }
 
   snapshot(now = this.clock()) {

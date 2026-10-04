@@ -159,10 +159,11 @@ export async function quote(tokenIn, tokenOut, amountInRaw, { attempts = 4, dead
  * main position has its own price (R1-G); the impact shown to the judge is the main's direction.
  */
 export async function costPicture({ ethSide, usdc, midPrice }) {
+  const feePct = cfg.poolFee / 10_000; // 500 → 0.05 %
   const out = {
     at: Date.now(), impactBps: 0,
     expectedSlippagePct: cfg.expectedSlippageBps / 100, tolerancePct: cfg.slippageBps / 100,
-    costPct: 0.05 + cfg.expectedSlippageBps / 100, sellQuotePrice: null, buyQuotePrice: null, block: null,
+    costPct: feePct + cfg.expectedSlippageBps / 100, sellQuotePrice: null, buyQuotePrice: null, block: null,
   };
   try {
     const capitalEth = ethSide + (midPrice > 0 ? usdc / midPrice : 0);
@@ -170,19 +171,20 @@ export async function costPicture({ ethSide, usdc, midPrice }) {
     // the cost picture is informational and refreshed every tick: a short retry budget PER QUOTE (the two directions
     // are quoted one after the other, each under its own deadline); the next tick tries again
     const brief = { attempts: 2, deadlineMs: Math.min(cfg.quoteDeadlineMs, 8_000) };
-    if (capitalEth > 0.0005) {
-      const q = await quote(cfg.weth, cfg.usdc, parseUnits(capitalEth.toFixed(18), 18), brief);
-      out.sellQuotePrice = Number(formatUnits(q.amountOut, 6)) / capitalEth;
+    const enoughBase = cfg.market?.asset === 'ETH' ? capitalEth > 0.0005 : capitalEth * midPrice > 1; // the historical ETH threshold; a dollar elsewhere
+    if (enoughBase) {
+      const q = await quote(cfg.weth, cfg.usdc, parseUnits(capitalEth.toFixed(cfg.baseDecimals), cfg.baseDecimals), brief);
+      out.sellQuotePrice = Number(formatUnits(q.amountOut, cfg.quoteDecimals)) / capitalEth;
       out.block = q.block;
     }
     if (capitalUsdc > 1) {
-      const q = await quote(cfg.usdc, cfg.weth, parseUnits(capitalUsdc.toFixed(6), 6), brief);
-      out.buyQuotePrice = capitalUsdc / Number(formatEther(q.amountOut));
+      const q = await quote(cfg.usdc, cfg.weth, parseUnits(capitalUsdc.toFixed(cfg.quoteDecimals), cfg.quoteDecimals), brief);
+      out.buyQuotePrice = capitalUsdc / Number(formatUnits(q.amountOut, cfg.baseDecimals));
       out.block = q.block;
     }
     const ref = ethSide * midPrice >= usdc ? (out.sellQuotePrice ?? out.buyQuotePrice) : (out.buyQuotePrice ?? out.sellQuotePrice);
-    if (ref && midPrice) out.impactBps = Math.max(0, Math.abs((ref / midPrice) - 1) * 10_000 - 5); // the quote already includes the 0.05% fee
-    out.costPct = 0.05 + out.impactBps / 100 + out.expectedSlippagePct;
+    if (ref && midPrice) out.impactBps = Math.max(0, Math.abs((ref / midPrice) - 1) * 10_000 - feePct * 100); // the quote already includes the pool fee
+    out.costPct = feePct + out.impactBps / 100 + out.expectedSlippagePct;
   } catch (error) {
     out.error = describeError(error);
     out.costPct = null;

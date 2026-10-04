@@ -104,6 +104,7 @@ export function buildReport({ db = null, path = null, mode = 'paper', day = null
     const finalValuation = valuations.at(-1) ?? null;
     const finalPrice = finalValuation?.value.price ?? last?.price ?? null;
     const header = {
+      asset: cfg?.market?.asset ?? 'ETH', market: cfg?.market?.name ?? 'base-eth-usdc', strategy: cfg?.strategy ?? null,
       mode, day: day ?? null, window: win, rows: { judgments: judgments.length, decisions: decisions.length, switches: switches.length, costs: costs.length, equity: equity.length, arms: arms.length },
       agentVersion: cfg?.version ?? null, configHash: hashes[0] ?? null, sourceHash: sourceHashes[0] ?? null,
       configChangedMidRun: hashes.length > 1 || sourceHashes.length > 1, configHashes: hashes, sourceHashes,
@@ -314,7 +315,7 @@ export function renderReport(r) {
   out.push(`   tick ${h.tickMs === null ? 'n/a' : `${h.tickMs} ms`}, votes ${n(h.voteRule)}, slow brain required ${n(h.requireDeepseek)} (cooldown ${h.deepseekCooldownMs === null ? 'n/a' : `${h.deepseekCooldownMs / 1000} s`}), judge ${n(h.judgeModel)}`);
   out.push(`   virtual capital ${money(h.paperCapitalUsd, 2)}, notional cap ${money(h.notionalCapUsd, 2)}, inference budget ${money(h.inferenceBudgetUsdPerDay, 2)}/day`);
   out.push(`   opening: ${h.opening ? `${h.opening.source} at ${h.opening.since}, price ${money(h.opening.openingPrice, 2)}, ${finite(h.opening.ethSide) ? h.opening.ethSide.toFixed(6) : 'n/a'} ETH + ${money(h.opening.usdc, 2)} USDC; now ${finite(h.opening.nowEthSide) ? h.opening.nowEthSide.toFixed(6) : 'n/a'} ETH + ${money(h.opening.nowUsdc, 2)} USDC` : 'n/a'}; initial wallet ${money(h.initial?.walletUsd, 2)} at ${n(h.initial?.ts)}`);
-  out.push(`   rows ${h.firstRowAt ?? 'n/a'} → ${h.lastRowAt ?? 'n/a'}; ETH ${money(h.startPrice, 2)} → ${money(h.endPrice, 2)} (final tape ${n(h.finalPriceAt)}, stale ${n(h.finalPriceStale)}, ${h.valuationSource})`);
+  out.push(`   rows ${h.firstRowAt ?? 'n/a'} → ${h.lastRowAt ?? 'n/a'}; ${h.asset} ${money(h.startPrice, 2)} → ${money(h.endPrice, 2)} (final tape ${n(h.finalPriceAt)}, stale ${n(h.finalPriceStale)}, ${h.valuationSource})`);
   out.push('');
   out.push('2. Time');
   out.push(`   wall ${t.wallSpanMinutes} min; planned ticks ${n(t.plannedTicks)}; ticks seen ${t.ticksSeen}; judgments ${t.judgments} (errors ${t.judgeErrors}); ticks without a judgment ${t.ticksWithoutJudgment}`);

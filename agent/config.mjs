@@ -14,7 +14,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 export const ROOT = resolve(here, '..');
 export const OWNER_CAP_USD = 100; // the real-money ceiling of this pilot: the live notional cap never exceeds it
 export const FEATURE_SCHEMA = 'features-v2.1';
-export const AGENT_VERSION = '2.13.0';
+export const AGENT_VERSION = '2.14.0';
 
 /**
  * Named starting points for the vote rule (README: Presets). `trend` (the default) and `trend-fast` vote
@@ -46,6 +46,77 @@ export const STRATEGIES = Object.freeze({
 });
 export const DEFAULT_STRATEGY = 'hedge';
 export const REENTRY_RULES = Object.freeze(['breakout', 'above-sale', 'above-sale-votes']);
+
+/**
+ * Markets (README: Markets): which token the bot holds against which dollar, on which chain. A market is always spot
+ * against a USD stablecoin. Every address below was checked on-chain on 2026-10-04 — the quoter's and the router's
+ * factory, the router's wrapped native token, the tokens' symbols and decimals, the pool of the pair at the fee tier —
+ * and every fee tier is the deepest of its pair for a $1 000–$10 000 quote on that day; the Coinbase product of every
+ * asset was online. Only `base-eth-usdc` has run in this repository's sessions and replays: the others are supported,
+ * not tested, and refuse MODE=live. MARKET_* keys override a preset's fields; MARKET=custom needs all of them.
+ */
+const UNISWAP_V3 = Object.freeze({ factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', quoter: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e', router: '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45' });
+const OP_STACK_GAS_ORACLE = '0x420000000000000000000000000000000000000F';
+const CHAINS = Object.freeze({
+  base: { chainId: 8453, chain: 'Base', rpcUrl: 'https://mainnet.base.org', factory: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD', quoter: '0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a', router: '0x2626664c2603336E57B271c5C0b26F421741e481', wrappedNative: '0x4200000000000000000000000000000000000006', gasOracle: OP_STACK_GAS_ORACLE, quote: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' },
+  ethereum: { chainId: 1, chain: 'Ethereum', rpcUrl: 'https://ethereum-rpc.publicnode.com', ...UNISWAP_V3, wrappedNative: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', gasOracle: null, quote: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' },
+  arbitrum: { chainId: 42161, chain: 'Arbitrum One', rpcUrl: 'https://arb1.arbitrum.io/rpc', ...UNISWAP_V3, wrappedNative: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', gasOracle: null, quote: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831' },
+  optimism: { chainId: 10, chain: 'OP Mainnet', rpcUrl: 'https://mainnet.optimism.io', ...UNISWAP_V3, wrappedNative: '0x4200000000000000000000000000000000000006', gasOracle: OP_STACK_GAS_ORACLE, quote: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85' },
+  polygon: { chainId: 137, chain: 'Polygon PoS', rpcUrl: 'https://polygon-bor-rpc.publicnode.com', ...UNISWAP_V3, wrappedNative: '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270', gasOracle: null, quote: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359' },
+});
+const market = (chain, m) => Object.freeze({ ...CHAINS[chain], quoteToken: 'USDC', quoteDecimals: 6, baseDecimals: 18, tested: false, ...m });
+export const MARKETS = Object.freeze({
+  'base-eth-usdc': market('base', { asset: 'ETH', baseToken: 'WETH', base: '0x4200000000000000000000000000000000000006', poolFee: 500, pool: '0xd0b53D9277642d899DF5C87A3966A349A798F224', product: 'ETH-USD', binanceSymbol: 'ETHUSDT', tested: true }),
+  'ethereum-eth-usdc': market('ethereum', { asset: 'ETH', baseToken: 'WETH', base: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', poolFee: 100, pool: '0xE0554a476A092703abdB3Ef35c80e0D76d32939F', product: 'ETH-USD', binanceSymbol: 'ETHUSDT' }),
+  'arbitrum-eth-usdc': market('arbitrum', { asset: 'ETH', baseToken: 'WETH', base: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', poolFee: 500, pool: '0xC6962004f452bE9203591991D15f6b388e09E8D0', product: 'ETH-USD', binanceSymbol: 'ETHUSDT' }),
+  'arbitrum-arb-usdc': market('arbitrum', { asset: 'ARB', baseToken: 'ARB', base: '0x912CE59144191C1204E64559FE8253a0e49E6548', poolFee: 3000, pool: '0xaEBDcA1Bc8d89177EbE2308d62af5e74885DcCc3', product: 'ARB-USD', binanceSymbol: 'ARBUSDT' }),
+  'optimism-eth-usdc': market('optimism', { asset: 'ETH', baseToken: 'WETH', base: '0x4200000000000000000000000000000000000006', poolFee: 500, pool: '0x1fb3cf6e48F1E7B10213E7b6d87D4c073C7Fdb7b', product: 'ETH-USD', binanceSymbol: 'ETHUSDT' }),
+  'optimism-op-usdc': market('optimism', { asset: 'OP', baseToken: 'OP', base: '0x4200000000000000000000000000000000000042', poolFee: 3000, pool: '0xB533c12fB4e7b53b5524EAb9b47d93fF6C7A456F', product: 'OP-USD', binanceSymbol: 'OPUSDT' }),
+  'polygon-eth-usdc': market('polygon', { asset: 'ETH', baseToken: 'WETH', base: '0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619', poolFee: 500, pool: '0xA4D8c89f0c20efbe54cBa9e7e7a7E509056228D9', product: 'ETH-USD', binanceSymbol: 'ETHUSDT' }),
+  'polygon-pol-usdc': market('polygon', { asset: 'POL', baseToken: 'WPOL', base: '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270', poolFee: 500, pool: '0xB6e57ed85c4c9dbfEF2a68711e9d6f36c56e0FcB', product: 'POL-USD', binanceSymbol: 'POLUSDT' }),
+});
+export const DEFAULT_MARKET = 'base-eth-usdc';
+/** MARKET_* overrides: env key → [field, kind]. */
+const MARKET_KEYS = Object.freeze({
+  MARKET_CHAIN_ID: ['chainId', 'int'], MARKET_CHAIN: ['chain', 'text'], MARKET_RPC_URL: ['rpcUrl', 'text'], MARKET_PRODUCT: ['product', 'product'],
+  MARKET_BINANCE_SYMBOL: ['binanceSymbol', 'symbolOrNone'], MARKET_ASSET: ['asset', 'symbol'], MARKET_BASE_TOKEN: ['baseToken', 'symbol'], MARKET_BASE: ['base', 'address'],
+  MARKET_BASE_DECIMALS: ['baseDecimals', 'decimals'], MARKET_QUOTE_TOKEN: ['quoteToken', 'symbol'], MARKET_QUOTE: ['quote', 'address'], MARKET_QUOTE_DECIMALS: ['quoteDecimals', 'decimals'],
+  MARKET_POOL_FEE: ['poolFee', 'fee'], MARKET_POOL: ['pool', 'address'], MARKET_FACTORY: ['factory', 'address'], MARKET_QUOTER: ['quoter', 'address'], MARKET_ROUTER: ['router', 'address'],
+  MARKET_WRAPPED_NATIVE: ['wrappedNative', 'address'], MARKET_GAS_ORACLE: ['gasOracle', 'addressOrNone'],
+});
+
+/** The market of a configuration: a preset (MARKET) with MARKET_* overrides, or MARKET=custom built from them alone. */
+export function resolveMarket(env, problems) {
+  const name = String(env.MARKET ?? DEFAULT_MARKET).trim().toLowerCase();
+  const preset = name === 'custom' ? {} : MARKETS[name];
+  if (!preset) { problems.push(`MARKET must be one of ${Object.keys(MARKETS).join(', ')} or custom`); return { ...MARKETS[DEFAULT_MARKET], name: DEFAULT_MARKET }; }
+  const m = { ...preset, name, overridden: [] };
+  for (const [key, [field, kind]] of Object.entries(MARKET_KEYS)) {
+    const raw = env[key];
+    if (raw === undefined || raw === '') continue;
+    const v = String(raw).trim();
+    const bad = (what) => problems.push(`${key} ${what}`);
+    if (kind === 'int') { const n = Number(v); if (!Number.isInteger(n) || n <= 0) bad('must be a positive integer'); else m[field] = n; }
+    else if (kind === 'decimals') { const n = Number(v); if (!Number.isInteger(n) || n < 0 || n > 36) bad('must be an integer 0..36'); else m[field] = n; }
+    else if (kind === 'fee') { const n = Number(v); if (![100, 500, 3000, 10000].includes(n)) bad('must be one of the Uniswap v3 fee tiers 100, 500, 3000, 10000'); else m[field] = n; }
+    else if (kind === 'address' || kind === 'addressOrNone') { if (kind === 'addressOrNone' && /^none$/iu.test(v)) m[field] = null; else if (!/^0x[0-9a-fA-F]{40}$/u.test(v)) bad('is not a hex address'); else m[field] = v; }
+    else if (kind === 'product') { if (!/^[A-Z0-9]{2,12}-USD$/u.test(v)) bad('must be a Coinbase USD product such as ETH-USD'); else m[field] = v; }
+    else if (kind === 'symbol' || kind === 'symbolOrNone') { if (kind === 'symbolOrNone' && /^none$/iu.test(v)) m[field] = null; else if (!/^[A-Za-z0-9.]{1,12}$/u.test(v)) bad('must be a short symbol'); else m[field] = v; }
+    else m[field] = v;
+    m.overridden.push(key);
+  }
+  if (m.overridden.length) m.tested = false; // an edited preset is a different market
+  for (const field of ['chainId', 'chain', 'rpcUrl', 'product', 'asset', 'baseToken', 'base', 'baseDecimals', 'quoteToken', 'quote', 'quoteDecimals', 'poolFee', 'pool', 'factory', 'quoter', 'router', 'wrappedNative']) {
+    if (m[field] === undefined || m[field] === null) problems.push(`market ${name}: ${field} is not set (MARKET=custom needs every MARKET_* key except MARKET_BINANCE_SYMBOL and MARKET_GAS_ORACLE)`);
+  }
+  if (m.binanceSymbol === undefined) m.binanceSymbol = null;
+  if (m.gasOracle === undefined) m.gasOracle = null;
+  if (m.tested === undefined) m.tested = false;
+  delete m.overridden;
+  return m;
+}
+/** The pool fee as the state text writes it: 500 → "0.05", 3000 → "0.3", 100 → "0.01". */
+export const feePctText = (poolFee) => String(Number((poolFee / 10_000).toFixed(4)));
 
 export class ConfigError extends RecordableError {}
 
@@ -92,25 +163,31 @@ export function loadConfig(env = process.env) {
   if (!strategy) problems.push(`STRATEGY must be one of ${Object.keys(STRATEGIES).join(', ')}`);
   const reentry = env.REENTRY !== undefined && env.REENTRY !== '' ? String(env.REENTRY).trim().toLowerCase() : (strategy?.reentry ?? 'breakout');
   if (!REENTRY_RULES.includes(reentry)) problems.push(`REENTRY must be one of ${REENTRY_RULES.join(', ')}`);
-  const rpcUrl = env.RPC_URL || 'https://mainnet.base.org';
+  const mkt = resolveMarket(env, problems);
+  const rpcUrl = env.RPC_URL || mkt.rpcUrl;
   try { if (new URL(rpcUrl).protocol !== 'https:') problems.push('RPC_URL must be https'); } catch { problems.push('RPC_URL is not a URL'); }
 
   const c = {
     mode,
     rpcUrl,
-    chainId: 8453,
+    chainId: mkt.chainId,
+    // the market (README: Markets): the asset, the stablecoin, the pool and the contracts; the fields below keep their
+    // historical names — `weth` is the base token of the pair and `usdc` the stablecoin, whatever the market
+    market: Object.freeze({ name: mkt.name, chain: mkt.chain, product: mkt.product, binanceSymbol: mkt.binanceSymbol, asset: mkt.asset, baseToken: mkt.baseToken, quoteToken: mkt.quoteToken, poolFee: mkt.poolFee, factory: mkt.factory, wrappedNative: mkt.wrappedNative, tested: mkt.tested }),
+    baseDecimals: mkt.baseDecimals,
+    quoteDecimals: mkt.quoteDecimals,
     accountAddress,
     hasPrivateKey: typeof env.PRIVATE_KEY === 'string' && /^0x[0-9a-fA-F]{64}$/u.test(env.PRIVATE_KEY),
-    // chain (Base mainnet) — addresses verified on-chain 2026-09-22
-    weth: '0x4200000000000000000000000000000000000006',
-    usdc: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-    router: '0x2626664c2603336E57B271c5C0b26F421741e481', // Uniswap SwapRouter02; swaps go through multicall(deadline, [exactInputSingle])
-    quoter: '0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a', // Uniswap QuoterV2
-    gasOracle: '0x420000000000000000000000000000000000000F', // Base GasPriceOracle predeploy (L1 data fee)
-    pool: '0xd0b53D9277642d899DF5C87A3966A349A798F224',   // WETH/USDC 0.05%
-    poolFee: 500,
+    // chain contracts of the market (the default, Base WETH/USDC 0.05 %, verified on-chain 2026-09-22 and 2026-10-04)
+    weth: mkt.base,             // the base token of the pair (WETH on the default market)
+    usdc: mkt.quote,            // the USD stablecoin
+    router: mkt.router,         // Uniswap SwapRouter02; swaps go through multicall(deadline, [exactInputSingle])
+    quoter: mkt.quoter,         // Uniswap QuoterV2
+    gasOracle: mkt.gasOracle,   // OP-stack GasPriceOracle predeploy (L1 data fee) where the chain has one
+    pool: mkt.pool,
+    poolFee: mkt.poolFee,
     // stream and freshness (event time, not receive time)
-    product: 'ETH-USD',
+    product: mkt.product,
     tickMs: int('TICK_MS', 5000, 2000, 300_000),
     candlesRefreshMs: int('CANDLES_REFRESH_MS', 60_000, 10_000, 600_000),
     maxDataAgeSec: int('MAX_DATA_AGE_SEC', 30, 5, 120),
@@ -203,6 +280,8 @@ export function loadConfig(env = process.env) {
   // whole position unswitchable (S1-05 / V12-A); default 2 × the virtual capital, range [1×, 10×]. The
   // two are kept apart on purpose: PAPER_* keys are refused in live, and MAX_CAPITAL_USD (a real-money
   // setting) is refused next to a virtual capital, so no combination quietly raises the live cap.
+  if (mode === 'live' && !mkt.tested) problems.push(`MODE=live is refused on market ${mkt.name}: only base-eth-usdc has run in this repository (README: Markets)`);
+  if (mode === 'paper' && !mkt.tested && c.paperCapitalUsd === null) problems.push(`market ${mkt.name} runs on a virtual capital only: set PAPER_CAPITAL_USD (mirroring a real wallet is wired for base-eth-usdc)`);
   if (mode === 'live' && (env.PAPER_CAPITAL_USD || env.PAPER_NOTIONAL_CAP_USD)) problems.push('PAPER_CAPITAL_USD / PAPER_NOTIONAL_CAP_USD are paper-only; unset them for MODE=live');
   if (mode === 'live' && env.PAPER_CONTINUE_UNKNOWN_BILLING) problems.push('PAPER_CONTINUE_UNKNOWN_BILLING is paper-only');
   if (c.paperContinueUnknownBilling) {

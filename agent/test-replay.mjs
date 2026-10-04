@@ -194,3 +194,31 @@ test('one replay end to end with a fake judge: the agreeing run sells at the nex
     assert.ok(valuations >= 40, 'a valuation per tick plus the session end');
   } finally { ledger.close(); }
 });
+
+test('a recorded judge replays a finished replay exactly with its own settings, and screens another rule without a miss', async () => {
+  const { loadRecordedJudgments, createRecordedJudge } = await import('./replay-recorded.mjs');
+  const hours = 28;
+  // flat for the warm-up, a fall, then a rise past the level of the sale: votes for USDC first, then for ETH
+  const start = T0 + 26 * 3600_000;
+  const price = (t) => (t < start ? 3000 : t < start + 60 * MINUTE_MS ? 3000 - 2 * ((t - start) / MINUTE_MS) : 2880 + 3 * ((t - start - 60 * MINUTE_MS) / MINUTE_MS));
+  const { minutes, fives } = synthetic({ fromMs: T0, hours, price });
+  let n = 0;
+  const judge = fakeJudge(() => { n += 1; return n < 3 ? flatSummary() : n < 50 ? agreeingSummary('USDC') : n < 70 ? flatSummary() : agreeingSummary('ETH'); });
+  const fromMs = start; const toMs = start + 110 * MINUTE_MS;
+  const base = { PAPER_CAPITAL_USD: '1000', TICK_MS: '60000', REQUIRE_DEEPSEEK: 'false', RISK_PRESET: 'trend', MIN_HOLD_MINUTES: '5' };
+  const run = async (cfg, j) => runReplay({ cfg, minutes, fiveMinutes: fives, fromMs, toMs, warmupMs: 26 * 3600_000, judge: j, judgeEnabled: true, keepLedgerOpen: true });
+  const switchesOf = (ledger) => ledger.db.prepare("SELECT ts, to_side FROM switches WHERE status = 'done' ORDER BY id").all().map((s) => `${s.ts} ${s.to_side}`);
+  const src = await run(makeCfg({ ...base, STRATEGY: 'votes' }), judge);
+  const rows = loadRecordedJudgments(src.ledger.db);
+  const sourceSwitches = switchesOf(src.ledger); src.ledger.close();
+  assert.ok(sourceSwitches.length >= 1, `the source switched: ${sourceSwitches}`);
+  const same = createRecordedJudge(rows);
+  const again = await run(makeCfg({ ...base, STRATEGY: 'votes' }), same);
+  assert.deepEqual(switchesOf(again.ledger), sourceSwitches, 'the same settings reproduce the source');
+  assert.equal(same.stats.misses, 0); assert.equal(same.stats.otherSide, 0); assert.equal(same.unused(), 0);
+  again.ledger.close();
+  const other = createRecordedJudge(rows);
+  const screened = await run(makeCfg({ ...base, STRATEGY: 'rebuy', BREAKOUT_MIN_PCT: '0' }), other);
+  assert.equal(other.stats.misses, 0, 'every state of another rule found its recorded answer'); assert.equal(other.stats.calls, rows.length);
+  screened.ledger.close();
+});

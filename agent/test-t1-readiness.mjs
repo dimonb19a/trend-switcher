@@ -192,7 +192,7 @@ test('T1: 30 wall-clock slots stay bounded, and a slow tick records missed slots
   const report = buildReport({ db: ledger.db });
   assert.equal(report.time.plannedTicks, 30);
   assert.match(report.header.sourceHash, /^[0-9a-f]{16}$/u);
-  assert.equal(report.header.agentVersion, '2.13.0');
+  assert.equal(report.header.agentVersion, '2.14.0');
   ledger.close();
 });
 

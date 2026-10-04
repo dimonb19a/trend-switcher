@@ -12,8 +12,8 @@ import { renderState } from './features.mjs';
 export const HIDDEN_TIME_LINE = 'Time (UTC): not provided.';
 
 /** The live state text with its date line replaced; everything else byte-identical. */
-export function renderStateHiddenDate(features, position) {
-  return renderState(features, position).replace(/^Time \(UTC\): .*$/mu, HIDDEN_TIME_LINE);
+export function renderStateHiddenDate(features, position, market) {
+  return renderState(features, position, market).replace(/^Time \(UTC\): .*$/mu, HIDDEN_TIME_LINE);
 }
 
 export function createReplayJudge({ maxAttempts = 4, timeoutMs = 20_000 } = {}) {

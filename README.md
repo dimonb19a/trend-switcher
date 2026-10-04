@@ -1,6 +1,6 @@
 # trend-switcher
 
-A small ETH/USDC position-switching agent for Base (Uniswap v3). It holds the whole position either in ETH or in USDC and switches sides only when a run of typed model judgments, a deterministic trend filter, a second model's confirmation and every hard limit agree. It runs on paper by default and writes everything it saw and did into a local SQLite ledger, so a run can be audited afterwards and compared with another run.
+A small position-switching agent on Uniswap v3: by default ETH/USDC on Base, and the same rules on other EVM chains and pairs, always an asset against a USD stablecoin (see Markets). It holds the whole position either in the asset or in the stablecoin and switches sides only when a run of typed model judgments, a deterministic trend filter, a second model's confirmation and every hard limit agree. It runs on paper by default and writes everything it saw and did into a local SQLite ledger, so a run can be audited afterwards and compared with another run.
 
 This is an experimental tool, with the recorded paper results in `SESSIONS.md`. Read the next section first.
 
@@ -64,6 +64,29 @@ The judge answers four questions every tick. Which answers count as a vote, and 
 | `forecast` | forecast | 5 of 6 | the control: the rule of the first sessions; switches only on a judged 15-minute move beyond cost; no qualifying vote in the sessions recorded so far |
 
 Not offered as presets: 9 of 10 (nine agreeing minutes before an entry, more than the regime basis needs) and 2 of 3 (a short confirmation; every other veto, the daily switch cap and the minimum hold still apply). Both remain settable through `VOTE_WINDOW` and `VOTE_MIN`. Every preset keeps the trend filter, the slow brain, the risk-off ceiling and the hard limits; the slow brain is told which basis a candidate stands on.
+
+## Markets
+
+The bot always holds one asset or a USD stablecoin, spot, through a Uniswap v3 pool, and reads the asset's Coinbase USD tape. `MARKET` picks the pair:
+
+| `MARKET` | Chain | Pool | Tape | Round trip at $1k / $10k / $100k, 2026-10-04 | Status |
+| --- | --- | --- | --- | --- | --- |
+| `base-eth-usdc` (default) | Base | WETH/USDC 0.05 % | ETH-USD | −0.10 / −0.13 / −0.35 % | every session and replay in `SESSIONS.md` |
+| `ethereum-eth-usdc` | Ethereum | WETH/USDC 0.01 % | ETH-USD | −0.02 / −0.03 / −0.09 % (mainnet gas not included) | supported, not tested |
+| `arbitrum-eth-usdc` | Arbitrum One | WETH/USDC 0.05 % | ETH-USD | −0.10 / −0.11 / −0.19 % | supported, not tested |
+| `polygon-eth-usdc` | Polygon PoS | WETH/USDC 0.05 % | ETH-USD | −0.19 / −1.0 / −12 % | supported, not tested; shallow above $1k |
+| `optimism-eth-usdc` | OP Mainnet | WETH/USDC 0.05 % | ETH-USD | −0.35 / −2.6 / −26 % | supported, not tested; shallow |
+| `polygon-pol-usdc` | Polygon PoS | WPOL/USDC 0.05 % | POL-USD | −0.38 / −2.8 / −26 % | supported, not tested; shallow |
+| `arbitrum-arb-usdc` | Arbitrum One | ARB/USDC 0.3 % | ARB-USD | −0.90 / −3.8 / −42 % | supported, not tested; shallow |
+| `optimism-op-usdc` | OP Mainnet | OP/USDC 0.3 % | OP-USD | −1.2 / −7.2 / −69 % | supported, not tested; shallow |
+
+**What "supported, not tested" means.** Every address was checked on-chain on 2026-10-04 — the quoter's and the router's factory, the router's wrapped native token, the tokens' symbols and decimals, the factory's pool for the pair at the fee tier — every fee tier was the deepest of its pair for a $1k–$10k quote that day, and every tape was an online Coinbase product. `node agent/selfcheck.mjs` repeats the on-chain checks for the market you configure. No session or replay of this repository has run on these markets: they run in paper only, on a virtual capital (`PAPER_CAPITAL_USD`), and `MODE=live` refuses to start on them. The round-trip column is the reason to look before running: on a shallow pool one switch costs more than the whole 0.9 % breakout bar, and the bot can only lose there at that size. Measure your own size with `node agent/probe-impact.mjs` (two read-only quotes per size).
+
+**Another pool or pair.** Any `MARKET_*` key overrides a preset's field (an edited preset counts as untested); `MARKET=custom` builds a market from all of them: `MARKET_CHAIN_ID`, `MARKET_CHAIN`, `MARKET_RPC_URL`, `MARKET_PRODUCT` (a Coinbase USD product, for the tape and the candles), `MARKET_ASSET`, `MARKET_BASE_TOKEN`, `MARKET_BASE`, `MARKET_BASE_DECIMALS`, `MARKET_QUOTE_TOKEN`, `MARKET_QUOTE`, `MARKET_QUOTE_DECIMALS`, `MARKET_POOL_FEE`, `MARKET_POOL`, `MARKET_FACTORY`, `MARKET_QUOTER`, `MARKET_ROUTER`, `MARKET_WRAPPED_NATIVE`, and optionally `MARKET_BINANCE_SYMBOL` (a fallback for the candles) and `MARKET_GAS_ORACLE`. Run the selfcheck first.
+
+**Replaying another market.** The replay's cost scenario uses a measured price impact, and the default table belongs to Base WETH/USDC, so a replay of another market refuses to start without its own: `node agent/probe-impact.mjs` prints the table as its last line, `REPLAY_IMPACT_TABLE_BPS='<that line>'` hands it to `agent/replay.mjs`, and `node agent/history-fetch.mjs --product ARB-USD ...` fetches the asset's candles.
+
+Inside the code and the ledger the two sides keep their historical names, `ETH` and `USDC` (and the configuration keys `weth` and `usdc`): on another market `ETH` means the market's asset and `USDC` its stablecoin. Reports print the asset's symbol.
 
 ## What we tested, and what we did not
 
@@ -152,13 +175,15 @@ run as separate processes. Rate-limited replies are retried a few times rather t
 judgments. The replay-report shows the arm against holding ETH over the same window, with the worst
 drop of each and where the arm stood at the hold's lowest point: the view a hedge is judged by.
 
+**Screening a rule change for free.** `node agent/replay-recorded.mjs --source <a finished replay ledger> ...` replays the same window with the answers that replay paid for, found by the market part of the state text at the same instants, so a change of `STRATEGY`, `REENTRY`, a breakout bar or a limit costs no judge call. Run it first with the source's own settings: the switches must come out identical (on seven months of 2022 they did, all 31). The limit is stated in its output: the judge gave each answer while it saw the source bot's position, and the ticks where the new rule holds the other side are counted (`otherSide`). It is a screening; a rule worth keeping is confirmed by a replay that pays the judge.
+
 ## The ledger
 
 One SQLite file per run, schema-versioned, never migrated silently. It holds every judgment, every decision with its stage (window not full, candidate, vetoed by the trend filter, blocked by limits, deferred by the cooldown, vetoed by the slow brain, executed), every switch with its legs and receipts, every cost, the equity curve, every inference attempt with KNOWN or UNKNOWN billing, per-slot observations, the compressed market state of every tick, and the effective configuration under its hash. Keys appear in it only as `set` or `unset`. `agent/report.mjs` reads a ledger read-only and prints the day report; `--json` gives the same as data.
 
 ## Live mode
 
-It exists and is deliberately hard to arm: `MODE=live` in `.env` **and** `--live` on the command line; `ACCOUNT_ADDRESS` and a `PRIVATE_KEY` whose address matches it; the slow brain required; the notional capped at $100 by code, which `MAX_CAPITAL_USD` may lower and never raise. Paper-only settings are refused in live. Every failed, reverted, timed-out or unknown on-chain outcome latches a halt until `--reset-halt`. It is published for completeness; we do not recommend running it. See `RUNBOOK.md`.
+It exists, only on the default market (Base WETH/USDC, the one this code has run on), and is deliberately hard to arm: `MODE=live` in `.env` **and** `--live` on the command line; `ACCOUNT_ADDRESS` and a `PRIVATE_KEY` whose address matches it; the slow brain required; the notional capped at $100 by code, which `MAX_CAPITAL_USD` may lower and never raise. Paper-only settings are refused in live. Every failed, reverted, timed-out or unknown on-chain outcome latches a halt until `--reset-halt`. It is published for completeness; we do not recommend running it. See `RUNBOOK.md`.
 
 ## Tests
 

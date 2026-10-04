@@ -6,10 +6,13 @@
 import { cfg } from './config.mjs';
 import * as client from './judge-client.mjs';
 
-export const QUESTIONS = Object.freeze({
+/** The four typed questions, worded for a market's asset and stablecoin; the default market's text is the one every recorded session asked. */
+export function questionsFor(market = cfg.market) {
+  const A = market.asset; const Q = market.quoteToken;
+  return Object.freeze({
   regime: {
     type: 'choice',
-    instructions: 'Using only the numbers in the state, which regime best describes ETH over the last hours? If the data quality line says DEGRADED or key numbers are unavailable, answer chaotic.',
+    instructions: `Using only the numbers in the state, which regime best describes ${A} over the last hours? If the data quality line says DEGRADED or key numbers are unavailable, answer chaotic.`,
     criteria: {
       trend_up: 'prices are rising with the trend measures agreeing (EMA20 above EMA50, positive slope, positive multi-hour returns)',
       trend_down: 'prices are falling with the trend measures agreeing (EMA20 below EMA50, negative slope, negative multi-hour returns)',
@@ -19,7 +22,7 @@ export const QUESTIONS = Object.freeze({
   },
   direction_15m: {
     type: 'choice',
-    instructions: 'Where is the ETH price more likely to be in 15 minutes compared to now, by more than the execution cost stated in the state? This is a forecast; answer flat unless the numbers clearly favour one side.',
+    instructions: `Where is the ${A} price more likely to be in 15 minutes compared to now, by more than the execution cost stated in the state? This is a forecast; answer flat unless the numbers clearly favour one side.`,
     criteria: {
       up: 'higher by more than the switching cost',
       down: 'lower by more than the switching cost',
@@ -28,7 +31,7 @@ export const QUESTIONS = Object.freeze({
   },
   switch_quality: {
     type: 'choice',
-    instructions: 'Given the current position, the data quality and the execution cost, is this a good moment to switch the whole position between ETH and USDC?',
+    instructions: `Given the current position, the data quality and the execution cost, is this a good moment to switch the whole position between ${A} and ${Q}?`,
     criteria: {
       good: 'the evidence is consistent across horizons, the data is not degraded, and the expected move clearly exceeds the cost',
       marginal: 'some evidence, but the move barely covers the cost or the horizons disagree',
@@ -39,7 +42,10 @@ export const QUESTIONS = Object.freeze({
     type: 'noul',
     instructions: 'Do the numbers show an abnormal condition that argues for not trading at all right now (degraded or unavailable data, extreme volatility relative to the day, extreme spread, or inconsistent numbers)?',
   },
-});
+  });
+}
+
+export const QUESTIONS = questionsFor(cfg.market);
 
 const validUsage = client.validUsage; // non-negative integer token counts, the same rule the client prices by
 

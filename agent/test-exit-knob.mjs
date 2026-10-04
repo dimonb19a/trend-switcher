@@ -1,5 +1,6 @@
-// RISK_LATCH_BLOCKS_EXITS: by default a latched loss limit halts every switch; with the knob off it halts only
-// switches into ETH, and the risk-reducing switch into USDC stays allowed. Any other halt blocks both ways.
+// RISK_LATCH_BLOCKS_EXITS: with the knob off (the shipped default since 2.12.0) a latched loss limit halts only
+// switches into ETH, and the risk-reducing switch into USDC stays allowed; with the knob on (the rule of sessions 1–9,
+// the test baseline) it halts every switch. Any other halt blocks both ways.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { limits } from './policy.mjs';
@@ -10,8 +11,9 @@ const features = computeFeatures(makeSnapshot({ now: T0 }), { at: T0, costPct: 0
 const stats = (over = {}) => ({ switchesToday: 0, lastSwitchAt: null, dailyNetPnlPct: 0, totalNetPnlPct: 0, inferenceTodayUsd: 0, inferenceUnknownReserveUsd: 0, inferenceBudgetCommittedUsd: 0, halt: null, pendingSwitches: 0, ...over });
 const args = (target, st) => ({ now: T0, features, position: { lastSwitchAt: null }, stats: st, notionalUsd: 50, target });
 
-test('default: a latched daily loss halts switches in both directions', () => {
-  const cfg = makeCfg({});
+test('knob on: a latched daily loss halts switches in both directions', () => {
+  const cfg = makeCfg({ RISK_LATCH_BLOCKS_EXITS: 'true' });
+  assert.equal(cfg.riskLatchBlocksExits, true);
   const st = stats({ halt: { reason: 'risk (tick): daily net loss -3.2% beyond the daily limit 3%', at: 'x' }, dailyNetPnlPct: -3.2 });
   assert.equal(limits(args('USDC', st), cfg).ok, false);
   assert.equal(limits(args('ETH', st), cfg).ok, false);

@@ -14,8 +14,13 @@ export const WETH = '0x4200000000000000000000000000000000000006';
 export const T0 = 1_800_000_000_000; // 2027-01-15T08:00:00Z, a fixed test epoch
 export const REVIEW_EPOCH = Date.parse('2026-09-22T12:00:00Z'); // the review date, a second epoch for clock-independence checks
 
+/**
+ * The test baseline keeps the breakout condition off and the strict loss latch, so the tests of the vote machinery,
+ * the limits and the execution path exercise one rule at a time on the gentle synthetic tape. The shipped defaults
+ * (breakout 0.9 % over 120 minutes, a latch that blocks only entries) are asserted in test-config.mjs.
+ */
 export function makeCfg(over = {}) {
-  return loadConfig({ AGENT_TEST: '1', AGENT_DB_PATH: ':memory:', AGENT_LOCK_PATH: '/dev/null', ACCOUNT_ADDRESS: '0x1111111111111111111111111111111111111111', JUDGE_BASE_URL: 'https://judge.example', JUDGE_MODEL: 'judge-model-1', ...over });
+  return loadConfig({ AGENT_TEST: '1', AGENT_DB_PATH: ':memory:', AGENT_LOCK_PATH: '/dev/null', ACCOUNT_ADDRESS: '0x1111111111111111111111111111111111111111', JUDGE_BASE_URL: 'https://judge.example', JUDGE_MODEL: 'judge-model-1', BREAKOUT_MIN_PCT: '0', RISK_LATCH_BLOCKS_EXITS: 'true', ...over });
 }
 
 /** A continuous 65-minute tape (one tick per minute plus one at `now`) and 300 closed contiguous 5-minute candles. */

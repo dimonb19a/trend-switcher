@@ -14,7 +14,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 export const ROOT = resolve(here, '..');
 export const OWNER_CAP_USD = 100; // the real-money ceiling of this pilot: the live notional cap never exceeds it
 export const FEATURE_SCHEMA = 'features-v2.1';
-export const AGENT_VERSION = '2.11.0';
+export const AGENT_VERSION = '2.12.0';
 
 /**
  * Named starting points for the vote rule (README: Presets). `trend` (the default) and `trend-fast` vote
@@ -139,17 +139,18 @@ export function loadConfig(env = process.env) {
     voteMin: int('VOTE_MIN', preset?.voteMin ?? 5, 1, 20),
     minDirectionP: num('MIN_DIRECTION_P', 0.7, 0.5, 0.99),
     minRegimeP: num('MIN_REGIME_P', 0.5, 0.5, 0.99),
-    // breakout condition (README: Presets), off by default: a candidate passes only when the price has moved beyond the
-    // high/low of the closed candles of the last BREAKOUT_LOOKBACK_MIN minutes by at least BREAKOUT_MIN_PCT percent —
-    // new information, not another judgment of the same state. Part of the hashed configuration.
-    breakoutMinPct: num('BREAKOUT_MIN_PCT', 0, 0, 20),
+    // breakout condition (README: Presets), 0.9 % over the last 120 minutes by default (0 turns it off): a candidate passes
+    // only when the price has moved beyond the high/low of the closed candles of the last BREAKOUT_LOOKBACK_MIN minutes by
+    // at least BREAKOUT_MIN_PCT percent — new information, not another judgment of the same state. The default is the
+    // arm the 2022 replay was judged by (SESSIONS.md, session 10). Part of the hashed configuration.
+    breakoutMinPct: num('BREAKOUT_MIN_PCT', 0.9, 0, 20),
     breakoutLookbackMin: int('BREAKOUT_LOOKBACK_MIN', 120, 60, 240),
     maxRiskOffP: num('MAX_RISK_OFF_P', 0.6, 0.1, 0.9),
-    // RISK_LATCH_BLOCKS_EXITS (default true, the published behaviour): a latched daily or total loss limit halts every switch.
-    // false: the latch halts only switches INTO ETH; a switch into USDC — the risk-reducing move a hedge exists for — stays
-    // allowed. Halts of other kinds (an unresolved on-chain outcome, an UNKNOWN bill) block both directions either way.
-    // Part of the hashed configuration.
-    riskLatchBlocksExits: bool(env.RISK_LATCH_BLOCKS_EXITS, true),
+    // RISK_LATCH_BLOCKS_EXITS (default false): a latched daily or total loss limit halts only switches INTO ETH; a switch
+    // into USDC — the risk-reducing move a hedge exists for — stays allowed. true: the latch halts every switch until
+    // --reset-halt (the rule of sessions 1–9). Halts of other kinds (an unresolved on-chain outcome, an UNKNOWN bill) block
+    // both directions either way. Part of the hashed configuration.
+    riskLatchBlocksExits: bool(env.RISK_LATCH_BLOCKS_EXITS, false),
     // slow brain. SLOW_BRAIN_FRAME: the question the slow brain is asked — `forecast` (the candidate against the
     // next 15 minutes and the execution cost) or `regime` (whether the judge's multi-hour regime is likely to
     // persist long enough to pay for the switch). Part of the hashed configuration.

@@ -14,7 +14,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 export const ROOT = resolve(here, '..');
 export const OWNER_CAP_USD = 100; // the real-money ceiling of this pilot: the live notional cap never exceeds it
 export const FEATURE_SCHEMA = 'features-v2.1';
-export const AGENT_VERSION = '2.12.0';
+export const AGENT_VERSION = '2.13.0';
 
 /**
  * Named starting points for the vote rule (README: Presets). `trend` (the default) and `trend-fast` vote
@@ -28,6 +28,24 @@ export const RISK_PRESETS = Object.freeze({
   forecast: Object.freeze({ voteBasis: 'forecast', voteWindow: 6, voteMin: 5 }),
 });
 export const DEFAULT_RISK_PRESET = 'trend';
+
+/**
+ * The strategies (README: Strategies): how the bot leaves ETH and how it comes back. All of them vote the same way
+ * (RISK_PRESET); they differ in the price condition, in what a latched loss blocks, and in the re-entry rule.
+ * Explicit BREAKOUT_MIN_PCT, RISK_LATCH_BLOCKS_EXITS and REENTRY override a strategy's values.
+ *   votes     — the judge alone: a switch on the votes and the trend filter                      (bot 1)
+ *   breakout  — votes + a 0.9 % price breakout beyond the last two hours, both ways; a latched loss blocks every switch (bot 2)
+ *   hedge     — votes + the breakout, and a latched loss never blocks a sale into USDC            (bot 3)
+ *   rebuy     — the hedge's exit, and back into ETH as soon as the price is back above the last sale (bot 4)
+ */
+export const STRATEGIES = Object.freeze({
+  votes: Object.freeze({ breakoutMinPct: 0, riskLatchBlocksExits: true, reentry: 'breakout' }),
+  breakout: Object.freeze({ breakoutMinPct: 0.9, riskLatchBlocksExits: true, reentry: 'breakout' }),
+  hedge: Object.freeze({ breakoutMinPct: 0.9, riskLatchBlocksExits: false, reentry: 'breakout' }),
+  rebuy: Object.freeze({ breakoutMinPct: 0.9, riskLatchBlocksExits: false, reentry: 'above-sale' }),
+});
+export const DEFAULT_STRATEGY = 'hedge';
+export const REENTRY_RULES = Object.freeze(['breakout', 'above-sale', 'above-sale-votes']);
 
 export class ConfigError extends RecordableError {}
 
@@ -69,6 +87,11 @@ export function loadConfig(env = process.env) {
   if (!preset) problems.push(`RISK_PRESET must be one of ${Object.keys(RISK_PRESETS).join(', ')}`);
   const voteBasis = env.VOTE_BASIS !== undefined && env.VOTE_BASIS !== '' ? String(env.VOTE_BASIS).trim().toLowerCase() : (preset?.voteBasis ?? 'forecast');
   if (!['forecast', 'regime'].includes(voteBasis)) problems.push('VOTE_BASIS must be "forecast" or "regime"');
+  const strategyName = String(env.STRATEGY ?? DEFAULT_STRATEGY).trim().toLowerCase();
+  const strategy = STRATEGIES[strategyName];
+  if (!strategy) problems.push(`STRATEGY must be one of ${Object.keys(STRATEGIES).join(', ')}`);
+  const reentry = env.REENTRY !== undefined && env.REENTRY !== '' ? String(env.REENTRY).trim().toLowerCase() : (strategy?.reentry ?? 'breakout');
+  if (!REENTRY_RULES.includes(reentry)) problems.push(`REENTRY must be one of ${REENTRY_RULES.join(', ')}`);
   const rpcUrl = env.RPC_URL || 'https://mainnet.base.org';
   try { if (new URL(rpcUrl).protocol !== 'https:') problems.push('RPC_URL must be https'); } catch { problems.push('RPC_URL is not a URL'); }
 
@@ -139,18 +162,24 @@ export function loadConfig(env = process.env) {
     voteMin: int('VOTE_MIN', preset?.voteMin ?? 5, 1, 20),
     minDirectionP: num('MIN_DIRECTION_P', 0.7, 0.5, 0.99),
     minRegimeP: num('MIN_REGIME_P', 0.5, 0.5, 0.99),
-    // breakout condition (README: Presets), 0.9 % over the last 120 minutes by default (0 turns it off): a candidate passes
+    // breakout condition (README: Strategies), 0.9 % over the last 120 minutes unless the strategy says otherwise (0 turns it off): a candidate passes
     // only when the price has moved beyond the high/low of the closed candles of the last BREAKOUT_LOOKBACK_MIN minutes by
     // at least BREAKOUT_MIN_PCT percent — new information, not another judgment of the same state. The default is the
     // arm the 2022 replay was judged by (SESSIONS.md, session 10). Part of the hashed configuration.
-    breakoutMinPct: num('BREAKOUT_MIN_PCT', 0.9, 0, 20),
+    strategy: strategyName,
+    breakoutMinPct: num('BREAKOUT_MIN_PCT', strategy?.breakoutMinPct ?? 0.9, 0, 20),
     breakoutLookbackMin: int('BREAKOUT_LOOKBACK_MIN', 120, 60, 240),
     maxRiskOffP: num('MAX_RISK_OFF_P', 0.6, 0.1, 0.9),
-    // RISK_LATCH_BLOCKS_EXITS (default false): a latched daily or total loss limit halts only switches INTO ETH; a switch
+    // RISK_LATCH_BLOCKS_EXITS (false unless the strategy says otherwise): a latched daily or total loss limit halts only switches INTO ETH; a switch
     // into USDC — the risk-reducing move a hedge exists for — stays allowed. true: the latch halts every switch until
     // --reset-halt (the rule of sessions 1–9). Halts of other kinds (an unresolved on-chain outcome, an UNKNOWN bill) block
     // both directions either way. Part of the hashed configuration.
-    riskLatchBlocksExits: bool(env.RISK_LATCH_BLOCKS_EXITS, false),
+    riskLatchBlocksExits: bool(env.RISK_LATCH_BLOCKS_EXITS, strategy?.riskLatchBlocksExits ?? false),
+    // REENTRY (set by STRATEGY): how the bot comes back into ETH after a sale — breakout | above-sale | above-sale-votes
+    // (policy.mjs reentryCandidate). Part of the hashed configuration.
+    reentry,
+    // REENTRY_MARGIN_PCT: how far above the last sale the price must be for an above-sale re-entry; by default the exit's own breakout bar
+    reentryMarginPct: num('REENTRY_MARGIN_PCT', strategy?.breakoutMinPct ?? 0.9, 0, 20),
     // slow brain. SLOW_BRAIN_FRAME: the question the slow brain is asked — `forecast` (the candidate against the
     // next 15 minutes and the execution cost) or `regime` (whether the judge's multi-hour regime is likely to
     // persist long enough to pay for the switch). Part of the hashed configuration.

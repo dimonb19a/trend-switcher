@@ -403,6 +403,18 @@ export function openLedger(cfg = defaultCfg, { clock = () => Date.now() } = {}) 
       .run(now(), mode, arm, side, ethSide, usdc, equityUsd, costsUsd, netUsd, switches ?? 0, note ?? null);
   }
 
+  /**
+   * The fill price (USDC per ETH) of the most recent completed switch into USDC in this mode — every executed leg of
+   * that switch together, so a live sale of native ETH and WETH counts as one price — or null when there is none.
+   * The re-entry level of REENTRY=above-sale and above-sale-votes (README: Strategies).
+   */
+  function lastSalePrice() {
+    const sale = db.prepare("SELECT id FROM switches WHERE mode = ? AND to_side = 'USDC' AND status = 'done' ORDER BY id DESC LIMIT 1").get(mode);
+    if (!sale) return null;
+    const r = db.prepare("SELECT COALESCE(SUM(amount_in),0) AS ai, COALESCE(SUM(amount_out_actual),0) AS ao FROM legs WHERE switch_id = ? AND kind IN ('swap','paper') AND amount_out_actual IS NOT NULL").get(sale.id);
+    return r.ai > 0 && r.ao > 0 ? r.ao / r.ai : null;
+  }
+
   function totals() {
     const judgments = db.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(cost_usd),0) AS cost FROM judgments WHERE mode = ?').get(mode);
     const switches = db.prepare('SELECT COUNT(*) AS n FROM switches WHERE mode = ?').get(mode).n;
@@ -414,7 +426,7 @@ export function openLedger(cfg = defaultCfg, { clock = () => Date.now() } = {}) 
     db, kv, clock, transaction, provenance, insertJudgment, insertDecision, recordCost, insertEquity, ensureInitial,
     beginInference, settleInference, unknownInference, observe, captureInput,
     openSwitch, updateSwitch, getSwitch, closeSwitch, requiredHalts, recomputeSpent, deriveSwitchStatus, openLeg, updateLeg, getLeg, cancelPlannedLegs,
-    pendingSwitches, pendingLegs, legsAwaitingAccounting, switchesToSettle, legsOf, stats, latchHalt, resetHalt, insertArm, totals,
+    pendingSwitches, pendingLegs, legsAwaitingAccounting, switchesToSettle, legsOf, stats, latchHalt, resetHalt, insertArm, totals, lastSalePrice,
     close() { db.close(); },
   };
   return api;

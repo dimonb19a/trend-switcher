@@ -87,11 +87,12 @@ test('the virtual capital accepts a size ladder up to one million and refuses mo
   assert.throws(() => loadConfig(env({ PAPER_CAPITAL_USD: '1000001' })), /PAPER_CAPITAL_USD/u);
 });
 
-test('shipped defaults (2.12.0): breakout 0.9 % over 120 minutes, a loss latch blocks only entries into ETH', () => {
+test('shipped defaults: STRATEGY=hedge — breakout 0.9 % over 120 minutes, a loss latch blocks only entries into ETH, re-entry on the breakout', () => {
   const c = loadConfig(env());
   assert.equal(c.breakoutMinPct, 0.9);
   assert.equal(c.breakoutLookbackMin, 120);
   assert.equal(c.riskLatchBlocksExits, false);
+  assert.equal(c.strategy, 'hedge'); assert.equal(c.reentry, 'breakout');
   assert.equal(loadConfig(env({ BREAKOUT_MIN_PCT: '0' })).breakoutMinPct, 0, 'zero turns the breakout condition off');
   assert.equal(loadConfig(env({ RISK_LATCH_BLOCKS_EXITS: 'true' })).riskLatchBlocksExits, true, 'the strict latch stays available');
   // both are decision parameters: they are part of the described (hashed) configuration

@@ -199,5 +199,5 @@ test('R3-C5: a replay of the same receipt keeps the first committed valuation; d
 test('R3: the release label matches the schema and README', async () => {
   const { AGENT_VERSION } = await import('./config.mjs');
   const { SCHEMA_VERSION } = await import('./ledger.mjs');
-  assert.equal(AGENT_VERSION, '2.12.0'); assert.equal(SCHEMA_VERSION, 6); // v2.7: durable inference and timed-session evidence tables
+  assert.equal(AGENT_VERSION, '2.13.0'); assert.equal(SCHEMA_VERSION, 6); // v2.7: durable inference and timed-session evidence tables
 });

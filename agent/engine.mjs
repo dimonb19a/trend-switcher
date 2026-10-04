@@ -31,7 +31,7 @@
 // the engine and the ledger must share one clock (R1-A). `run.mjs` wires the
 // real deps.
 import { existsSync } from 'node:fs';
-import { VoteWindow, breakoutFilter, limits, riskBreach, trendFilter } from './policy.mjs';
+import { VoteWindow, breakoutFilter, limits, reentryCandidate, riskBreach, trendFilter } from './policy.mjs';
 import { computeFeatures, renderState as defaultRenderState } from './features.mjs';
 import { OPEN_LEG_STATES } from './ledger.mjs';
 import { RecordableError, describeError  } from './errors.mjs';
@@ -206,12 +206,12 @@ export function createEngine(deps) {
     const lim = features ? limits({ now, features, position: { ...position, lastSwitchAt: st.lastSwitchAt }, stats: st, notionalUsd, target }, cfg) : { ok: false, problems: ['features unavailable'] };
     if (!lim.ok) problems.push(...lim.problems);
     if (target) {
-      const c = votes.candidate(position, now);
+      // the same candidate rule as the tick: the votes, then the re-entry rule after a sale (REENTRY), then the filters it keeps
+      const re = reentryCandidate({ candidate: votes.candidate(position, now), side: position.side, price, lastSalePrice: cfg.reentry === 'breakout' || position.side !== 'USDC' ? null : ledger.lastSalePrice() }, cfg);
+      const c = re.candidate;
       if (c.target !== target) problems.push(`candidate no longer ${target}: ${c.reason}`);
-      const tf = features ? trendFilter(features, target) : { ok: false, reason: 'no features' };
-      if (!tf.ok) problems.push(tf.reason);
-      const bf = features ? breakoutFilter(features, target, cfg) : { ok: false, reason: 'no features' };
-      if (!bf.ok) problems.push(bf.reason);
+      if (re.trendFilter) { const tf = features ? trendFilter(features, target) : { ok: false, reason: 'no features' }; if (!tf.ok) problems.push(tf.reason); }
+      if (re.breakout) { const bf = features ? breakoutFilter(features, target, cfg) : { ok: false, reason: 'no features' }; if (!bf.ok) problems.push(bf.reason); }
     }
     return { ok: problems.length === 0, problems, stage, now, price, priceAt, priceSource, position, stats: st, features, notionalUsd };
   }
@@ -567,8 +567,9 @@ export function createEngine(deps) {
       if (!budgetLeft) votes.clear();
       ledger.insertEquity({ eth: position.real.eth, weth: position.weth, usdc: position.usdc, price, equityUsd: position.equityUsd, walletUsd: position.walletUsd });
 
-      const c = votes.candidate(position, clock());
-      ledger.observe('vote', { ...c, side: position.side, degraded: features.dataQuality.degraded, budgetLeft });
+      const re = reentryCandidate({ candidate: votes.candidate(position, clock()), side: position.side, price, lastSalePrice: cfg.reentry === 'breakout' || position.side !== 'USDC' ? null : ledger.lastSalePrice() }, cfg);
+      const c = re.candidate;
+      ledger.observe('vote', { ...c, side: position.side, degraded: features.dataQuality.degraded, budgetLeft, ...(re.rule === 'breakout' ? {} : { reentry: re.rule }) });
       if (arms) {
         arms.init({ ethSide: position.ethSide, usdc: position.usdc, price, quotes: lastQuotes, now: clock() });
         arms.tick({ price, features, quotes: lastQuotes, candidateFor: (side) => votes.candidate({ side }, clock()).target, now: clock(), judgeCostUsd: judgment?.costUsd ?? 0 });
@@ -584,9 +585,9 @@ export function createEngine(deps) {
       }
 
       // 2) candidate → trend filter → limits → slow brain → verdict → execution
-      const tf = trendFilter(features, c.target);
+      const tf = re.trendFilter ? trendFilter(features, c.target) : { ok: true, skipped: true };
       if (!tf.ok) { ledger.insertDecision({ price, position: position.side, candidate: c.target, votes: c.votes, outcome: 'vetoed', reason: tf.reason, stage: 'trend' }); log('candidate vetoed', { target: c.target, reason: tf.reason }); return { vetoed: tf.reason }; }
-      const bf = breakoutFilter(features, c.target, cfg);
+      const bf = re.breakout ? breakoutFilter(features, c.target, cfg) : { ok: true, skipped: true };
       if (!bf.ok) { ledger.insertDecision({ price, position: position.side, candidate: c.target, votes: c.votes, outcome: 'vetoed', reason: bf.reason, stage: 'breakout' }); log('candidate vetoed by the breakout condition', { target: c.target, reason: bf.reason }); return { vetoed: bf.reason }; }
       const notionalUsd = c.target === 'USDC' ? position.ethUsd : position.usdc;
       const lim = limits({ now: clock(), features, position: { ...position, lastSwitchAt: st.lastSwitchAt }, stats: st, notionalUsd, target: c.target }, cfg);

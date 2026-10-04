@@ -128,6 +128,31 @@ export function breakoutFilter(features, target, cfg = defaultCfg) {
 }
 
 /**
+ * Coming back into ETH after a sale (REENTRY, set by STRATEGY). `breakout`: an entry is a candidate of the votes and
+ * passes the trend filter and the breakout condition like any switch. `above-sale`: while the position is in USDC
+ * after a completed sale, the price being back at least REENTRY_MARGIN_PCT above that sale's fill price IS the entry — no
+ * votes, no trend filter, no breakout bar — and below that level there is no entry at all: the judge decides when to leave,
+ * the price decides when to come back. The margin is a hysteresis band (by default the exit's own 0.9 % bar): a crash often
+ * retests the level it broke, and a re-entry exactly at the sale would buy every retest. `above-sale-votes`: the votes and the trend filter still decide, and the price must be back at or
+ * above the same level instead of the breakout bar. Without a completed sale (a run that started in USDC) every mode
+ * falls back to `breakout`. Returns the candidate to act on and which checks it still has to pass. Deterministic.
+ */
+export function reentryCandidate({ candidate, side, price, lastSalePrice }, cfg = defaultCfg) {
+  const mode = cfg.reentry ?? 'breakout';
+  if (mode === 'breakout' || side !== 'USDC' || !finite(lastSalePrice) || !finite(price)) return { candidate, rule: 'breakout', trendFilter: true, breakout: true };
+  const margin = finite(cfg.reentryMarginPct) ? cfg.reentryMarginPct : 0;
+  const bar = lastSalePrice * (1 + margin / 100);
+  const above = price >= bar;
+  const level = margin > 0 ? `${margin}% above the last sale ${lastSalePrice.toFixed(2)} (bar ${bar.toFixed(2)})` : `the last sale ${lastSalePrice.toFixed(2)}`;
+  if (mode === 'above-sale') {
+    if (above) return { candidate: { ...candidate, target: 'ETH', reason: `price ${price.toFixed(2)} is back at or above ${level}` }, rule: mode, trendFilter: false, breakout: false };
+    return { candidate: candidate.target === 'ETH' ? { ...candidate, target: null, reason: `price ${price.toFixed(2)} is below ${level}` } : candidate, rule: mode, trendFilter: false, breakout: false };
+  }
+  if (candidate.target === 'ETH' && !above) return { candidate: { ...candidate, target: null, reason: `${candidate.reason}; price ${price.toFixed(2)} is below ${level}` }, rule: mode, trendFilter: true, breakout: false };
+  return { candidate, rule: mode, trendFilter: true, breakout: false };
+}
+
+/**
  * Hard limits. Every one is a veto that no model can lift. Every input must be
  * a finite number or a known value; anything unknown vetoes.
  */

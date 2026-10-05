@@ -64,7 +64,7 @@ test('the report of a virtual-capital day: header, time, costs, funnel, the swit
 
     const r = buildReport({ db: h.ledger.db, projectionUsd: 100 });
     // 1. header
-    assert.equal(r.header.agentVersion, '2.14.0'); assert.equal(r.header.tickMs, 5000); assert.equal(r.header.paperCapitalUsd, 1000); assert.equal(r.header.notionalCapUsd, 2000); assert.equal(r.header.inferenceBudgetUsdPerDay, 3);
+    assert.equal(r.header.agentVersion, '2.15.0'); assert.equal(r.header.tickMs, 5000); assert.equal(r.header.paperCapitalUsd, 1000); assert.equal(r.header.notionalCapUsd, 2000); assert.equal(r.header.inferenceBudgetUsdPerDay, 3);
     assert.equal(r.header.configChangedMidRun, false); assert.equal(r.header.opening.source, 'PAPER_CAPITAL_USD'); assert.equal(r.header.opening.openingPrice, 3000);
     assert.ok(near(r.header.opening.ethSide, 1000 / 3000) && r.header.opening.usdc === 0, 'the opening balances survive the fill'); assert.equal(r.header.opening.nowEthSide, 0);
     assert.equal(r.header.voteRule, '5 of 6 within 45 s, gap ≤ 10 s'); assert.equal(r.header.requireDeepseek, true); assert.equal(r.header.configHash.length, 16);

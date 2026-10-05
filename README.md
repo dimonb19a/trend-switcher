@@ -33,9 +33,19 @@ The judge, the votes and the hard limits are the same in every strategy; what di
 | `votes` (bot 1) | 5 of 6 judgments call the trend down and EMA20 is below EMA50 | the same, the other way | every switch |
 | `breakout` (bot 2) | the same, and the price is 0.9 % below the low of the last two hours | the same, and the price is 0.9 % above the high of the last two hours | every switch |
 | `hedge` (bot 3) | as `breakout` | as `breakout` | only buying back |
-| `rebuy` (bot 4) | as `breakout` | the price is 0.9 % above the last sale; no votes needed | only buying back |
+| `rebuy` (bot 4, the default) | as `breakout` | the price is 0.9 % above the last sale; no votes needed | only buying back |
 
-Why four. Bot 1 is the rule of the first sessions: every run of agreeing judgments is a trade, 60 to 130 switches a month in the replays, and the whipsaw is paid every time. Bot 2 adds a price condition and becomes quiet, but its loss latch can block the very sale a hedge exists for. Bot 3 lets a latched loss block only buying back: it sells in a crash. Its way back, though, is a 0.9 % burst above the two-hour high, which a slow, steady rise rarely prints at the moment the votes agree: from October 2023 to April 2024 it sat in USDC for three and a half months and made +28 % while holding made +118 % (`SESSIONS.md`, session 11). Bot 4 keeps bot 3's exit and comes back as soon as the price is back a margin above the level it sold at; it is new, and its replays are in progress.
+Why four, and why bot 4 is the default. Bot 1 is the rule of the first sessions: every run of agreeing judgments is a trade, and the whipsaw is paid every time — 610 switches over the six-month rise of 2023–24, ending below the start while ETH doubled. Bot 2 adds a price condition and becomes quiet, but its loss latch can block the very sale a hedge exists for. Bot 3 lets a latched loss block only buying back: it sells in a crash. Its way back, though, is a 0.9 % burst above the two-hour high, which a slow rise rarely prints at the moment the votes agree: over that rise it sat in USDC for three and a half months and made +28 % while holding made +118 %. Bot 4 keeps bot 3's exit and comes back as soon as the price is 0.9 % above the level it sold at. Replayed on five windows (`SESSIONS.md`, sessions 10–14; $10 000, net of all costs):
+
+| Window | Holding ETH | Bot 1 | Bot 2 | Bot 3 | Bot 4 |
+| --- | --- | --- | --- | --- | --- |
+| May–Nov 2022: Luna, the June low, FTX | −52.5 % | −49.5 % | −10.8 % | −16.5 % | **+0.9 %** |
+| Oct 2023–Mar 2024: a rise with two pullbacks | +118.2 % | −4.9 % | +79.8 % | +28.2 % | **+104.0 %** |
+| May 2021: a choppy top, then the crash | −2.5 % | **+50.0 %** | +7.0 % | +14.9 % | −13.7 % |
+| November 2022: FTX | −17.7 % | −17.9 % | −17.7 % | **−6.6 %** | **−6.6 %** |
+| February 2024: a straight rally | +46.7 % | +19.5 % | +46.7 % | +46.7 % | +46.7 % |
+
+Bot 4 beat holding in three windows, matched it in one and lost in one, the choppy top of May 2021, where every dip was a sale and every retest a buy-back 0.9 % higher. Its worst window against holding is 14 points behind (the rise); bot 3's is 90. Bot 1's +50 % in May 2021 is the same rule that gave back more than half of February 2024 and all of the 2023–24 rise. Every number is one draw of a stochastic judge per arm: a second run keeps the order of the bots, not the exact numbers.
 
 **Re-entry** (`REENTRY`): `breakout` — an entry is a candidate of the votes and passes the trend filter and the breakout condition like any switch (bots 1–3). `above-sale` — while the position is in USDC after a completed sale, the price being `REENTRY_MARGIN_PCT` above that sale's fill price is the entry by itself, and below that level there is no entry at all: the judge decides when to leave, the price decides when to come back (bot 4). `above-sale-votes` — the same level, but the votes and the trend filter still have to agree. The level is the fill of the most recent sale; without one (a run that started in USDC) every mode falls back to `breakout`.
 

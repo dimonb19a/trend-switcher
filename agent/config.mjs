@@ -14,7 +14,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 export const ROOT = resolve(here, '..');
 export const OWNER_CAP_USD = 100; // the real-money ceiling of this pilot: the live notional cap never exceeds it
 export const FEATURE_SCHEMA = 'features-v2.1';
-export const AGENT_VERSION = '2.14.0';
+export const AGENT_VERSION = '2.15.0';
 
 /**
  * Named starting points for the vote rule (README: Presets). `trend` (the default) and `trend-fast` vote
@@ -36,7 +36,7 @@ export const DEFAULT_RISK_PRESET = 'trend';
  *   votes     — the judge alone: a switch on the votes and the trend filter                      (bot 1)
  *   breakout  — votes + a 0.9 % price breakout beyond the last two hours, both ways; a latched loss blocks every switch (bot 2)
  *   hedge     — votes + the breakout, and a latched loss never blocks a sale into USDC            (bot 3)
- *   rebuy     — the hedge's exit, and back into ETH as soon as the price is back above the last sale (bot 4)
+ *   rebuy     — the hedge's exit, and back into ETH 0.9 % above the last sale, no votes needed   (bot 4, the default since 2.15.0)
  */
 export const STRATEGIES = Object.freeze({
   votes: Object.freeze({ breakoutMinPct: 0, riskLatchBlocksExits: true, reentry: 'breakout' }),
@@ -44,7 +44,7 @@ export const STRATEGIES = Object.freeze({
   hedge: Object.freeze({ breakoutMinPct: 0.9, riskLatchBlocksExits: false, reentry: 'breakout' }),
   rebuy: Object.freeze({ breakoutMinPct: 0.9, riskLatchBlocksExits: false, reentry: 'above-sale' }),
 });
-export const DEFAULT_STRATEGY = 'hedge';
+export const DEFAULT_STRATEGY = 'rebuy';
 export const REENTRY_RULES = Object.freeze(['breakout', 'above-sale', 'above-sale-votes']);
 
 /**

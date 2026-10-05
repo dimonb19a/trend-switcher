@@ -4,7 +4,9 @@
 // Paper by default; live only when MODE=live in .env AND --live on the command
 // line. `--once` runs one tick and exits; `--reset-halt` clears a latched halt
 // on the owner's word; a file named KILL next to package.json stops the agent
-// on its next check. One clock is shared by the engine and the ledger (R1-A).
+// on its next check. `--until <UTC instant>` is a long paper run: one ledger,
+// an end written down, and the same command continues it after a restart.
+// One clock is shared by the engine and the ledger (R1-A).
 import { parseArgs } from 'node:util';
 import { existsSync } from 'node:fs';
 import { cfg, describeConfig } from './config.mjs';
@@ -16,14 +18,14 @@ import { openLedger } from './ledger.mjs';
 import { acquireLock, releaseLock } from './lock.mjs';
 import { createArms } from './arms.mjs';
 import { createEngine, resolveArming } from './engine.mjs';
-import { runTimedSession } from './session.mjs';
+import { noteLongRunStart, noteLongRunStop, resolveLongRun, runTimedSession, staleTooLong } from './session.mjs';
 import { RecordableError, describeError  } from './errors.mjs';
 
 const { values: args } = parseArgs({
   options: {
     once: { type: 'boolean', default: false }, live: { type: 'boolean', default: false },
     'no-judge': { type: 'boolean', default: false }, 'reset-halt': { type: 'boolean', default: false },
-    'duration-minutes': { type: 'string' },
+    'duration-minutes': { type: 'string' }, until: { type: 'string' },
   },
 });
 const clock = () => Date.now();
@@ -37,8 +39,12 @@ if (cfg.mode === 'paper' && cfg.accountAddress === null && cfg.paperCapitalUsd =
 }
 const timed = args['duration-minutes'] !== undefined;
 const durationMinutes = timed ? Number(args['duration-minutes']) : null;
-if (cfg.paperContinueUnknownBilling && !timed) {
-  console.error('refusing paper UNKNOWN-billing continuation outside a bounded timed session');
+// A long paper run: the open-ended loop with an end written down. It keeps one ledger across restarts.
+const long = resolveLongRun({ until: args.until, now: clock(), cfg, timed, once: args.once, live: args.live, noJudge: args['no-judge'],
+  judgeKeySet: judge.keyStatus() === 'set', judgePriced: judge.priceConfigured() });
+if (long.refuse) { console.error(`refusing a long paper run: ${long.refuse}`); process.exit(long.over ? 0 : 2); }
+if (cfg.paperContinueUnknownBilling && !timed && !long.ok) {
+  console.error('refusing paper UNKNOWN-billing continuation outside a bounded run (a timed session, or a long paper run with --until)');
   process.exit(2);
 }
 // A timed session is the measurement unit of this agent: paper only, a virtual capital, a fresh ledger,
@@ -124,12 +130,26 @@ try {
     const out = await engine.tick();
     if (out?.error) process.exitCode = 1;
   } else {
-    while (!stopping) {
+    if (long.ok) {
+      deadline = long.deadline;
+      const run = noteLongRunStart(ledger, { deadline, tickMs: cfg.tickMs, now: clock() });
+      log('long paper run', { until: run.until, start: run.startCount, firstStartAt: run.firstStartAt, halted: Boolean(recovered.halt) });
+    }
+    let staleSince = null;
+    while (!stopping && clock() < deadline) {
       const began = clock();
       const out = await engine.tick();
       if (out?.stop || out?.error) requestStop(out.reason ?? out.error ?? 'engine stop');
-      const wait = Math.max(0, cfg.tickMs - (clock() - began));
+      // a long run that has gone blind ends with a failure, so that its keeper starts a fresh process and connection
+      if (out?.stale || out?.waiting) staleSince ??= began; else staleSince = null;
+      if (long.ok && staleTooLong({ staleSinceMs: staleSince, now: clock(), tickMs: cfg.tickMs })) { requestStop('no usable tape for too long: restart for a fresh connection'); process.exitCode = 1; }
+      const wait = Math.max(0, Math.min(cfg.tickMs - (clock() - began), deadline - clock()));
       for (let left = wait; left > 0 && !stopping; left -= 1000) await new Promise((r) => setTimeout(r, Math.min(left, 1000)));
+    }
+    if (long.ok) {
+      const completed = !stopping && clock() >= deadline;
+      const record = noteLongRunStop(ledger, { now: clock(), reason: completed ? 'the end written down (--until)' : (stopWhy ?? 'stopped'), completed });
+      log(completed ? 'long paper run reached its end' : 'long paper run stopped; the same command continues it', { until: record?.until, starts: record?.startCount, reason: record?.stopReason });
     }
   }
 } catch (error) {

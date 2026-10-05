@@ -34,6 +34,7 @@ import { existsSync } from 'node:fs';
 import { VoteWindow, breakoutFilter, limits, reentryCandidate, riskBreach, trendFilter } from './policy.mjs';
 import { computeFeatures, renderState as defaultRenderState } from './features.mjs';
 import { OPEN_LEG_STATES } from './ledger.mjs';
+import { liftDailyLatchAfterItsDay } from './latch.mjs';
 import { RecordableError, describeError  } from './errors.mjs';
 
 /** The only allowed live combination is MODE=live AND --live; every other mismatch refuses to start (TR-01). */
@@ -54,6 +55,7 @@ export function createEngine(deps) {
   const mode = armed ? 'live' : 'paper';
   if (mode !== cfg.mode) throw new RecordableError(`engine mode ${mode} disagrees with configuration mode ${cfg.mode}`);
   const continueUnknownBilling = mode === 'paper' && cfg.paperContinueUnknownBilling;
+  const dailyLatchLift = mode === 'paper' && cfg.paperDailyLatchLift === 'midnight'; // paper only: the day after a losing day, trading resumes (latch.mjs)
   if (ledger.clock && ledger.clock !== clock) throw new RecordableError('the engine and the ledger must share one clock (R1-A)');
   const votes = new VoteWindow(cfg);
   let lastDeepseekAt = 0; let busy = false; let lastQuotes = null; let budgetWarned = false;
@@ -512,6 +514,10 @@ export function createEngine(deps) {
       if (killPresent()) { log('KILL file present, stopping'); return { stop: true }; }
       if (!canAct() || (!continueUnknownBilling && ledger.unknownInference().length)) return { stop: true, reason: 'session ended or inference billing UNKNOWN' };
       const now = clock();
+      if (dailyLatchLift) {
+        const latchedOn = liftDailyLatchAfterItsDay(ledger, mode, now);
+        if (latchedOn) { ledger.observe('latch', { lifted: 'daily loss', latchedOn, rule: 'PAPER_DAILY_LATCH_LIFT=midnight' }); log('daily-loss latch lifted: its UTC day is over', { latchedOn }); }
+      }
       const snap = feed.snapshot(now);
       if (captureInputs) ledger.captureInput(snap);
       if (!snap.last) { log('waiting for the tape'); return { waiting: true }; }

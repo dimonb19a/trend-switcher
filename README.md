@@ -51,7 +51,7 @@ Bot 4 beat holding in three windows, matched it in one and lost in one, the chop
 
 - **The windows are separate starts, and their results do not add up.** Bot 4 never buys back below its own sale, so every completed round trip leaves it with less ETH (1.0–1.5 % less in the rise, 1.4–6.5 % in May 2021), and its lead over holding lasts only while it waits in USDC under that sale. Followed straight through from May 2022 to April 2024, the sale of 5 May 2022 at 2 753 is bought back only on 14 February 2024, 650 days later: +32 % against +34 % for holding, with a worst drop of 7 % on the way down where holding's was 70 %, and +31 % of the 2023–24 rise instead of the +104 % of a bot that starts that October in ETH. It is insurance against the fall, not a way to end with more than holding.
 - **The daily loss limit is part of the result.** A latched daily loss blocks buying back, and in both crash windows that latch, not the price, kept the bot out: the price was back above the re-entry level five minutes after the sale of 5 May 2022 and on 77 five-minute ticks of 8 November 2022. Screened on the recorded answers with the daily limit at 10 %, the FTX month ends at −21 %, below holding; the 2022 window keeps its single sale as long as the 20-minute minimum hold stands, and ends at −31 % once that is cut to five minutes as well. The same latch is what makes May 2021 expensive: five of the six buy-backs waited for it to lift and came 1.5–7 % above the sale.
-- **A replay lifts that latch at midnight; live it waits for you.** On the live tape a latched daily loss stays until `--reset-halt` (Replay: the daily stop). After a day that cost 3 % the bot does not buy back until the operator lets it.
+- **A replay lifts that latch at midnight; live it waits for you.** On the live tape a latched daily loss stays until `--reset-halt` (Replay: the daily stop). After a day that cost 3 % the bot does not buy back until the operator lets it. A paper run may follow the replay's rule instead (`PAPER_DAILY_LATCH_LIFT=midnight`); live never does.
 
 **Re-entry** (`REENTRY`): `breakout` — an entry is a candidate of the votes and passes the trend filter and the breakout condition like any switch (bots 1–3). `above-sale` — while the position is in USDC after a completed sale, the price being `REENTRY_MARGIN_PCT` above that sale's fill price is the entry by itself, and below that level there is no entry at all: the judge decides when to leave, the price decides when to come back (bot 4). The hard limits still apply to that entry: a latched loss limit, the minimum hold and the daily switch cap can block it. `above-sale-votes` — the same level, but the votes and the trend filter still have to agree. The level is the fill of the most recent sale; without one (a run that started in USDC) every mode falls back to `breakout`.
 
@@ -148,6 +148,8 @@ See `RUNBOOK.md` before leaving a session unattended.
 
 A **timed session** is the measurement unit: paper only, a virtual capital, a fresh ledger, whole minutes up to one day. Slots belong to the wall clock, so an overlong tick consumes later slots instead of bursting late requests. The session manifest (planned, attempted, missed and completed slots, the stop reason) is stored in the ledger under `session:paper`. Ctrl+C or a file named `KILL` next to `package.json` stops it early.
 
+A **long paper run** is days or weeks on one ledger with its end written down: `node agent/run.mjs --until 2026-11-06T00:00:00Z`. Unlike a timed session it continues after a restart with the same command, so a reboot costs the ticks it missed and nothing else; it needs `PAPER_CONTINUE_UNKNOWN_BILLING=true`, and `PAPER_DAILY_LATCH_LIFT=midnight` if a latched daily loss should be lifted the next day, as the replays do, instead of waiting for `--reset-halt`. `node agent/status.mjs --db <ledger>` prints one line about a run in progress and says first what needs a look. `RUNBOOK.md` has the whole procedure.
+
 To **compare presets**, run several sessions over the same hours with different `RISK_PRESET` values and separate `AGENT_DB_PATH` and `AGENT_LOCK_PATH`. Paper has no on-chain effect, so parallel sessions cannot trade against each other; they still have separate feeds, quotes and API timings and share the machine and the RPC endpoint, so the comparison is over the same market window, not over identical input. `RUNBOOK.md` shows the three-preset layout.
 
 ## Replay: the same bot over a month of history
@@ -183,7 +185,8 @@ What is the same: everything that decides. What is replaced, and how:
   hint, so a replay is a screening with that caveat, never a proof.
 - **The daily stop.** Live, a latched daily loss waits for the owner's `--reset-halt`. A replay has
   no owner at the keyboard: the daily latch is lifted at the next simulated UTC midnight; the kill
-  limit and any switch-level halt are never lifted.
+  limit and any switch-level halt are never lifted. A paper run on the live tape follows the same
+  rule only when told to (`PAPER_DAILY_LATCH_LIFT=midnight`).
 
 The judge is called once per tick, in order (its question depends on the position), so a month at a
 five-minute tick is about 8 600 calls per arm and takes as long as the judge's latency allows; arms
@@ -203,7 +206,7 @@ It exists, only on the default market (Base WETH/USDC, the one this code has run
 
 ## Tests
 
-`npm test` covers the configuration schema, the policy, the engine, four rounds of boundary regressions from independent reviews, the virtual-capital paper mode, the report, the readiness of timed sessions, the feed and features, the lock, the slow-brain contract, and the replay (availability of history, the hidden date, the cost scenario and the next-minute fill, the midnight rule, one replay end to end). Everything runs on fakes with one injected clock.
+`npm test` covers the configuration schema, the policy, the engine, four rounds of boundary regressions from independent reviews, the virtual-capital paper mode, the report, the readiness of timed sessions, the long paper run (when it may start, its record across restarts, the rule that ends a blind process), the daily latch and the calendar, the one-line status, the feed and features, the lock, the slow-brain contract, the replay (availability of history, the hidden date, the cost scenario and the next-minute fill, the midnight rule, one replay end to end) and the two judge controls (a shuffle keeps every answer, the number of sale votes and the run lengths). Everything runs on fakes with one injected clock.
 
 ## Status
 

@@ -31,22 +31,11 @@ import { createReplayChain, IMPACT_TABLE_BPS } from './replay-chain.mjs';
 import { createReplayJudge, renderStateHiddenDate, HIDDEN_TIME_LINE } from './replay-judge.mjs';
 import { gapsOf, readHistory, sha256File } from './history-fetch.mjs';
 import { RecordableError, describeError } from './errors.mjs';
+import { liftDailyLatchAtMidnight } from './latch.mjs';
 
 const dayOf = (ms) => new Date(ms).toISOString().slice(0, 10);
 
-/**
- * The replay's midnight rule: a latched DAILY loss limit is lifted when the simulated UTC day changes,
- * and nothing else is — the kill limit, a switch-level halt, an UNKNOWN bill keep their latch.
- * Returns true when a latch was lifted.
- */
-export function liftDailyLatchAtMidnight(ledger, mode = 'paper') {
-  const halt = ledger.kv.get(`halt:${mode}`);
-  if (!halt || typeof halt.reason !== 'string') return false;
-  if (!/daily net loss/u.test(halt.reason) || /kill limit/u.test(halt.reason)) return false;
-  if (ledger.requiredHalts().length > 0) return false;
-  ledger.resetHalt();
-  return true;
-}
+export { liftDailyLatchAtMidnight }; // the midnight rule itself lives in latch.mjs, shared with a long paper run
 
 /**
  * Run one replay. Everything is injectable for the tests; the CLI below wires the real judge and the

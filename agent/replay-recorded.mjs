@@ -15,12 +15,22 @@
 //   node agent/replay-recorded.mjs --source data/replay-....db --from ... --to ... --minutes ... --candles ...
 //   (the environment of the rule to screen, MODE=paper, PAPER_CAPITAL_USD and TICK_MS as the source, a fresh AGENT_DB_PATH;
 //    no judge key is read)
+//
+// Two controls for the question "is it the judge or the rules?", both free as well:
+//   --shuffle-seed N   a RANDOM judge that switches as often as the real one: the recorded answers are cut into runs of
+//                      "votes for a sale" and "does not", the runs of each kind are put in a random order and interleaved
+//                      again. Every seed keeps the real number of sale votes, the real number of changes of mind and the
+//                      real run lengths; only where they fall against the market is random. Run many seeds and see where
+//                      the real result stands among them.
+//   --constant-down    NO judge: one fixed answer at every tick, "the trend is down", so a sale is decided by the
+//                      deterministic conditions alone (no --source needed).
 import { parseArgs } from 'node:util';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { cfg as defaultCfg, describeConfig } from './config.mjs';
+import { agreesWith } from './policy.mjs';
 import { runReplay } from './replay.mjs';
 import { summarize as defaultSummarize } from './judge.mjs';
 import { readHistory, sha256File } from './history-fetch.mjs';
@@ -69,31 +79,94 @@ export function createRecordedJudge(rows, { summarize = defaultSummarize } = {})
   };
 }
 
+/** A small seeded generator (mulberry32): the same seed gives the same order on every machine. */
+function seeded(seed) {
+  let a = Math.imul(seed, 2654435761) | 0;
+  return () => { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+const shuffled = (list, rand) => { const a = list.slice(); for (let i = a.length - 1; i > 0; i -= 1) { const j = Math.floor(rand() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+const summaryOf = (row) => (row.error || !row.summary ? null : JSON.parse(row.summary));
+
+/**
+ * The recorded answers in a random order that keeps how often the judge votes for a sale and how often it changes its
+ * mind: the rows are cut into runs (consecutive rows that vote for a sale, consecutive rows that do not; a failed reply
+ * belongs to the second kind and stays a failure), the runs of each kind are permuted, and the kinds alternate as they
+ * did. Returns { rows, down, runs }. `votesDown(summary)` decides what a vote for a sale is (the configured vote rule).
+ */
+export function shuffleRuns(rows, { seed, votesDown = (summary) => agreesWith(summary, 'USDC', defaultCfg) } = {}) {
+  if (!Number.isInteger(seed) || seed < 1) throw new RecordableError('a shuffle needs a whole seed, 1 or more');
+  const marked = rows.map((row) => { const summary = summaryOf(row); return { row, down: summary !== null && votesDown(summary) === true }; });
+  const runs = [];
+  for (const m of marked) { const last = runs[runs.length - 1]; if (last && last.down === m.down) last.items.push(m.row); else runs.push({ down: m.down, items: [m.row] }); }
+  const rand = seeded(seed);
+  const downs = shuffled(runs.filter((r) => r.down), rand); const others = shuffled(runs.filter((r) => !r.down), rand);
+  let d = 0; let o = 0;
+  const order = runs.map((r) => (r.down ? downs[d++] : others[o++]));
+  return { rows: order.flatMap((r) => r.items), down: marked.filter((m) => m.down).length, runs: runs.length };
+}
+
+/** A judge that plays the shuffled record back in order, one row per call: { judge, summarize, stats }. */
+export function createShuffledJudge(rows, { seed, votesDown, summarize = defaultSummarize } = {}) {
+  const mixed = shuffleRuns(rows, { seed, votesDown });
+  const stats = { recorded: rows.length, down: mixed.down, runs: mixed.runs, seed, calls: 0, misses: 0, errorsReplayed: 0 };
+  let lastSummary = null;
+  return {
+    stats,
+    async judge() {
+      const r = mixed.rows[stats.calls]; stats.calls += 1;
+      if (!r) { stats.misses += 1; throw Object.assign(new Error('shuffled judge: the record is shorter than this window'), { costUsd: 0 }); }
+      const usage = r.usage ? JSON.parse(r.usage) : null;
+      if (r.error || !r.summary) { stats.errorsReplayed += 1; throw Object.assign(new Error(r.error ?? 'shuffled judge: a record without a summary'), { costUsd: r.cost_usd, usage, model: r.model, ms: r.ms }); }
+      lastSummary = JSON.parse(r.summary);
+      return { model: r.model, answers: JSON.parse(r.answers), usage, costUsd: r.cost_usd, ms: r.ms, requestAt: r.request_at, responseAt: r.response_at };
+    },
+    summarize(answers) { const recorded = lastSummary; lastSummary = null; return recorded ?? summarize(answers); },
+  };
+}
+
+/** No judge at all: the same confident "the trend is down" at every tick, free. The vote for a sale is always there. */
+export function createConstantJudge() {
+  const summary = Object.freeze({ regime: 'trend_down', regimeP: 1, direction: 'down', directionP: 1, upP: 0, downP: 1, quality: 'good', qualityP: 1, riskOffP: 0 });
+  const stats = { calls: 0 };
+  return {
+    stats, summary,
+    async judge() { stats.calls += 1; return { model: 'constant:trend_down', answers: { constant: 'trend_down' }, usage: null, costUsd: 0, ms: 0, requestAt: null, responseAt: null }; },
+    summarize() { return { ...summary }; },
+  };
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const { values: args } = parseArgs({ options: {
     source: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' }, minutes: { type: 'string' }, candles: { type: 'string' },
     'warmup-hours': { type: 'string', default: '26' }, label: { type: 'string', default: '' },
+    'shuffle-seed': { type: 'string' }, 'constant-down': { type: 'boolean', default: false },
   } });
   const log = (message, extra) => console.log(`[${new Date().toISOString()}] ${message}${extra ? ' ' + JSON.stringify(extra) : ''}`);
   const refuse = (why) => { console.error(`refusing to replay with a recorded judge: ${why}`); process.exit(2); };
-  if (!args.source || !existsSync(args.source)) refuse('--source must be a finished replay ledger');
+  const constant = args['constant-down'] === true;
+  const seed = args['shuffle-seed'] === undefined ? null : Number(args['shuffle-seed']);
+  if (constant && seed !== null) refuse('--constant-down and --shuffle-seed are two different controls: choose one');
+  if (seed !== null && (!Number.isInteger(seed) || seed < 1)) refuse('--shuffle-seed must be a whole number, 1 or more');
+  if (!constant && (!args.source || !existsSync(args.source))) refuse('--source must be a finished replay ledger');
   const fromMs = Date.parse(args.from ?? ''); const toMs = Date.parse(args.to ?? '');
   if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) refuse('--from and --to must be ISO instants (the source window, or a part of it)');
   if (!args.minutes || !args.candles) refuse('--minutes and --candles: the history files the source used');
   if ([defaultCfg.databasePath, `${defaultCfg.databasePath}-wal`].some(existsSync)) refuse('choose a fresh AGENT_DB_PATH');
-  const rows = loadRecordedJudgments(resolve(args.source));
-  const recorded = createRecordedJudge(rows);
+  const rows = constant ? [] : loadRecordedJudgments(resolve(args.source));
+  const recorded = constant ? createConstantJudge() : seed !== null ? createShuffledJudge(rows, { seed }) : createRecordedJudge(rows);
+  const control = constant ? 'a constant judge: the trend is down at every tick' : seed !== null ? `a random judge: the recorded answers shuffled by runs, seed ${seed}` : null;
   let impactTable = null;
   if (process.env.REPLAY_IMPACT_TABLE_BPS) { try { impactTable = JSON.parse(process.env.REPLAY_IMPACT_TABLE_BPS); } catch { refuse('REPLAY_IMPACT_TABLE_BPS is not JSON'); } }
   const minutes = readHistory(resolve(args.minutes)); const fiveMinutes = readHistory(resolve(args.candles));
-  log('recorded-judge replay starting', { source: resolve(args.source), recorded: rows.length, strategy: defaultCfg.strategy, reentry: defaultCfg.reentry, db: defaultCfg.databasePath });
+  log(control ? 'control replay starting' : 'recorded-judge replay starting', { control, source: constant ? null : resolve(args.source), recorded: rows.length, strategy: defaultCfg.strategy, reentry: defaultCfg.reentry, db: defaultCfg.databasePath });
   try {
     await runReplay({
       minutes, fiveMinutes, fromMs, toMs, warmupMs: Number(args['warmup-hours']) * 3600_000, judge: recorded, judgeEnabled: true, impactTable,
-      meta: { label: args.label, recordedJudge: { source: resolve(args.source), sha256: sha256File(resolve(args.source)), caveat: 'answers recorded while the judge saw the source bot\'s position; a screening, not a paid replay' }, config: describeConfig(defaultCfg) },
+      meta: { label: args.label, ...(control ? { control } : {}),
+        ...(constant ? {} : { recordedJudge: { source: resolve(args.source), sha256: sha256File(resolve(args.source)), caveat: 'answers recorded while the judge saw the source bot\'s position; a screening, not a paid replay' } }), config: describeConfig(defaultCfg) },
       log: (m, extra) => { if (/^replay (ended|failed)/u.test(m)) log(m, extra); },
     });
   } catch (error) { log('replay failed', { error: describeError(error) }); process.exitCode = 1; }
-  log('recorded judge', { ...recorded.stats, unused: recorded.unused() });
+  log(control ? 'control judge' : 'recorded judge', { ...recorded.stats, ...(recorded.unused ? { unused: recorded.unused() } : {}) });
   if (recorded.stats.misses > 0) { log('some states had no recorded answer: the window, the history or the settings that shape the state differ from the source'); process.exitCode = 1; }
 }

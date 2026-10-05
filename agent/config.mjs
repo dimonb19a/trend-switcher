@@ -14,7 +14,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 export const ROOT = resolve(here, '..');
 export const OWNER_CAP_USD = 100; // the real-money ceiling of this pilot: the live notional cap never exceeds it
 export const FEATURE_SCHEMA = 'features-v2.1';
-export const AGENT_VERSION = '2.15.0';
+export const AGENT_VERSION = '2.16.0';
 
 /**
  * Named starting points for the vote rule (README: Presets). `trend` (the default) and `trend-fast` vote
@@ -224,6 +224,9 @@ export function loadConfig(env = process.env) {
     // A planning reserve per unknown call counts against the daily inference gate; it is not a vendor invoice.
     paperContinueUnknownBilling: mode === 'paper' && bool(env.PAPER_CONTINUE_UNKNOWN_BILLING, false),
     paperUnknownBillReserveUsd: 0,
+    // Paper-only: what lifts a latched DAILY loss limit. 'off' (the default) waits for --reset-halt, as live does;
+    // 'midnight' lifts it once its UTC day is over, the rule a replay uses, so a long unattended paper run keeps trading.
+    paperDailyLatchLift: 'off',
     // judge: bring your own provider (endpoint, model pin, key and prices come from the environment only; see judge-client.mjs).
     // Without an endpoint or a model pin the runner refuses to judge; a bare configuration still loads for tools and tests.
     judgeBaseUrl: typeof env.JUDGE_BASE_URL === 'string' && env.JUDGE_BASE_URL.trim() !== '' ? env.JUDGE_BASE_URL.trim() : null,
@@ -284,6 +287,12 @@ export function loadConfig(env = process.env) {
   if (mode === 'paper' && !mkt.tested && c.paperCapitalUsd === null) problems.push(`market ${mkt.name} runs on a virtual capital only: set PAPER_CAPITAL_USD (mirroring a real wallet is wired for base-eth-usdc)`);
   if (mode === 'live' && (env.PAPER_CAPITAL_USD || env.PAPER_NOTIONAL_CAP_USD)) problems.push('PAPER_CAPITAL_USD / PAPER_NOTIONAL_CAP_USD are paper-only; unset them for MODE=live');
   if (mode === 'live' && env.PAPER_CONTINUE_UNKNOWN_BILLING) problems.push('PAPER_CONTINUE_UNKNOWN_BILLING is paper-only');
+  if (env.PAPER_DAILY_LATCH_LIFT !== undefined && String(env.PAPER_DAILY_LATCH_LIFT).trim() !== '') {
+    const lift = String(env.PAPER_DAILY_LATCH_LIFT).trim().toLowerCase();
+    if (mode === 'live') problems.push('PAPER_DAILY_LATCH_LIFT is paper-only: live, a latched daily loss waits for --reset-halt');
+    else if (lift !== 'off' && lift !== 'midnight') problems.push('PAPER_DAILY_LATCH_LIFT must be off or midnight');
+    else c.paperDailyLatchLift = lift;
+  }
   if (c.paperContinueUnknownBilling) {
     c.paperUnknownBillReserveUsd = num('PAPER_UNKNOWN_BILL_RESERVE_USD', 0.001, 0.0001, 0.01);
     if (c.paperCapitalUsd === null) problems.push('PAPER_CONTINUE_UNKNOWN_BILLING needs a virtual capital (PAPER_CAPITAL_USD)');
